@@ -1,17 +1,18 @@
 /*! @file
   @brief
-  mruby/c memory management.
+  TLSF memory allocator for embedded systems.
 
   <pre>
-  Copyright (C) 2015- Kyushu Institute of Technology.
-  Copyright (C) 2015- Shimane IT Open-Innovation Center.
+  Original Copyright:
+    (C) 2015- Kyushu Institute of Technology.
+    (C) 2015- Shimane IT Open-Innovation Center.
+  Modification Contents:
+    (C) 2025- HASUMI Hitoshi @hasumikin
 
   This file is distributed under BSD 3-Clause License.
 
-  Memory management for objects in mruby/c.
-
   STRATEGY
-   Using TLSF and FistFit algorithm.
+   Using TLSF and First-Fit algorithm.
 
   MEMORY POOL USAGE (see struct MEMORY_POOL)
      | Memory pool header | Memory block pool to provide to application |
@@ -44,67 +45,85 @@
 /***** Feature test switches ************************************************/
 /***** System headers *******************************************************/
 //@cond
-#include "vm_config.h"
 #include <stdint.h>
-#include <string.h>
 #include <assert.h>
+#include <stddef.h>
+#if defined(ESTALLOC_PRINT_DEBUG)
+# include <stdio.h>
+#include <inttypes.h>
+#endif
 //@endcond
 
-#if !defined(MRBC_ALLOC_LIBC)
 /***** Local headers ********************************************************/
-#include "alloc.h"
-#include "hal.h"
-#if defined(MRBC_DEBUG)
-#include "console.h"
-#endif
+#include "estalloc.h"
 
 /***** Constant values ******************************************************/
 /*
   Layer 1st(f) and 2nd(s) model
   last 4bit is ignored
 
- FLI range      SLI0  1     2     3     4     5     6     7         BlockSize
-  0  0000-007f unused 0010- 0020- 0030- 0040- 0050- 0060- 0070-007f   16
-  1  0080-00ff  0080- 0090- 00a0- 00b0- 00c0- 00d0- 00e0- 00f0-00ff   16
-  2  0100-01ff  0100- 0120- 0140- 0160- 0180- 01a0- 01c0- 01e0-01ff   32
-  3  0200-03ff  0200- 0240- 0280- 02c0- 0300- 0340- 0380- 03c0-03ff   64
-  4  0400-07ff  0400- 0480- 0500- 0580- 0600- 0680- 0700- 0780-07ff  128
-  5  0800-0fff  0800- 0900- 0a00- 0b00- 0c00- 0d00- 0e00- 0f00-0fff  256
-  6  1000-1fff  1000- 1200- 1400- 1600- 1800- 1a00- 1c00- 1e00-1fff  512
-  7  2000-3fff  2000- 2400- 2800- 2c00- 3000- 3400- 3800- 3c00-3fff 1024
-  8  4000-7fff  4000- 4800- 5000- 5800- 6000- 6800- 7000- 7800-7fff 2048
-  9  8000-ffff  8000- 9000- a000- b000- c000- d000- e000- f000-ffff 4096
+                                                                    BlockSize by alignment
+ FLI range      SLI0  1     2     3     4     5     6     7          4-byte  8-byte
+  0  0000-007f unused 0010- 0020- 0030- 0040- 0050- 0060- 0070-007f     16      32
+  1  0080-00ff  0080- 0090- 00a0- 00b0- 00c0- 00d0- 00e0- 00f0-00ff     16      32
+  2  0100-01ff  0100- 0120- 0140- 0160- 0180- 01a0- 01c0- 01e0-01ff     32      64
+  3  0200-03ff  0200- 0240- 0280- 02c0- 0300- 0340- 0380- 03c0-03ff     64     128
+  4  0400-07ff  0400- 0480- 0500- 0580- 0600- 0680- 0700- 0780-07ff    128     256
+  5  0800-0fff  0800- 0900- 0a00- 0b00- 0c00- 0d00- 0e00- 0f00-0fff    256     512
+  6  1000-1fff  1000- 1200- 1400- 1600- 1800- 1a00- 1c00- 1e00-1fff    512    1024
+  7  2000-3fff  2000- 2400- 2800- 2c00- 3000- 3400- 3800- 3c00-3fff   1024    2048
+  8  4000-7fff  4000- 4800- 5000- 5800- 6000- 6800- 7000- 7800-7fff   2048    4096
+  9  8000-ffff  8000- 9000- a000- b000- c000- d000- e000- f000-ffff   4096    8192
 */
 
-#ifndef MRBC_ALLOC_FLI_BIT_WIDTH	// 0000 0000 0000 0000
-# define MRBC_ALLOC_FLI_BIT_WIDTH 9	// ~~~~~~~~~~~
+/*
+  ESTALLOC_ALIGNMENT == 4:
+   0 0000 0000 0000 0000
+     ^^^^ ^^^^ ^          ESTALLOC_FLI_BIT_WIDTH
+                ^^^       ESTALLOC_SLI_BIT_WIDTH
+                    ^^^^  ESTALLOC_IGNORE_LSBS
+  ESTALLOC_ALIGNMENT == 8:
+   0 0000 0000 0000 0000
+   ^ ^^^^ ^^^^            ESTALLOC_FLI_BIT_WIDTH
+               ^^^        ESTALLOC_SLI_BIT_WIDTH
+                  ^ ^^^^  ESTALLOC_IGNORE_LSBS
+*/
+#ifndef ESTALLOC_FLI_BIT_WIDTH
+# define ESTALLOC_FLI_BIT_WIDTH   9
 #endif
-#ifndef MRBC_ALLOC_SLI_BIT_WIDTH	// 0000 0000 0000 0000
-# define MRBC_ALLOC_SLI_BIT_WIDTH 3	//            ~~~
+#ifndef ESTALLOC_SLI_BIT_WIDTH
+# define ESTALLOC_SLI_BIT_WIDTH   3
 #endif
-#ifndef MRBC_ALLOC_IGNORE_LSBS		// 0000 0000 0000 0000
-# define MRBC_ALLOC_IGNORE_LSBS	  4	//                ~~~~
+#ifdef PLATFORM_64BIT
+# define ESTALLOC_IGNORE_LSBS    5
+#else
+# ifndef ESTALLOC_IGNORE_LSBS
+#  if ESTALLOC_ALIGNMENT == 4
+#   define ESTALLOC_IGNORE_LSBS    4
+#  elif ESTALLOC_ALIGNMENT == 8
+#   define ESTALLOC_IGNORE_LSBS    5
+#  endif
+# endif
 #endif
 
-#define SIZE_FREE_BLOCKS \
-  ((MRBC_ALLOC_FLI_BIT_WIDTH + 1) * (1 << MRBC_ALLOC_SLI_BIT_WIDTH))
-					// maybe 80 (0x50)
+#define SIZE_FREE_BLOCKS ((ESTALLOC_FLI_BIT_WIDTH + 1) * (1 << ESTALLOC_SLI_BIT_WIDTH))
 /*
    Minimum memory block size parameter.
-   Choose large one from sizeof(FREE_BLOCK) or (1 << MRBC_ALLOC_IGNORE_LSBS)
 */
-#if !defined(MRBC_MIN_MEMORY_BLOCK_SIZE)
-#define MRBC_MIN_MEMORY_BLOCK_SIZE sizeof(FREE_BLOCK)
-// #define MRBC_MIN_MEMORY_BLOCK_SIZE (1 << MRBC_ALLOC_IGNORE_LSBS)
+#if !defined(ESTALLOC_MIN_MEMORY_BLOCK_SIZE)
+# define ESTALLOC_MIN_MEMORY_BLOCK_SIZE (1 << ESTALLOC_IGNORE_LSBS)
 #endif
 
 
 /***** Macros ***************************************************************/
-#define FLI(x) ((x) >> MRBC_ALLOC_SLI_BIT_WIDTH)
-#define SLI(x) ((x) & ((1 << MRBC_ALLOC_SLI_BIT_WIDTH) - 1))
+#define FLI(x) ((x) >> ESTALLOC_SLI_BIT_WIDTH)
+#define SLI(x) ((x) & ((1 << ESTALLOC_SLI_BIT_WIDTH) - 1))
 
 
 /***** Typedefs *************************************************************/
+#if !defined(ESTALLOC_16BIT) && !defined(ESTALLOC_24BIT)
+# define ESTALLOC_24BIT
+#endif
 /*
   define memory block header for 16 bit
 
@@ -114,25 +133,20 @@
     FREE_BLOCK is 8 bytes
   on 16bit machine.
 */
-#if defined(MRBC_ALLOC_16BIT)
-#define MRBC_ALLOC_MEMSIZE_T	uint16_t
+#if defined(ESTALLOC_16BIT)
+#define ESTALLOC_MEMSIZE_T  uint16_t
 
 typedef struct USED_BLOCK {
-  MRBC_ALLOC_MEMSIZE_T size;		//!< block size, header included
-#if defined(MRBC_ALLOC_VMID)
-  uint8_t	       vm_id;		//!< mruby/c VM ID
-#endif
+  ESTALLOC_MEMSIZE_T size;    //!< block size, header included
+  uint8_t pad[2];  // for alignment compatibility on 16bit and 32bit machines
 } USED_BLOCK;
 
 typedef struct FREE_BLOCK {
-  MRBC_ALLOC_MEMSIZE_T size;		//!< block size, header included
-#if defined(MRBC_ALLOC_VMID)
-  uint8_t	       vm_id;		//!< dummy
-#endif
+  ESTALLOC_MEMSIZE_T size;    //!< block size, header included
 
   struct FREE_BLOCK *next_free;
   struct FREE_BLOCK *prev_free;
-  struct FREE_BLOCK *top_adrs;		//!< dummy for calculate sizeof(FREE_BLOCK)
+  struct FREE_BLOCK *top_adrs;    //!< dummy for calculate sizeof(FREE_BLOCK)
 } FREE_BLOCK;
 
 
@@ -145,73 +159,54 @@ typedef struct FREE_BLOCK {
     FREE_BLOCK is 16 bytes
   on 32bit machine.
 */
-#elif defined(MRBC_ALLOC_24BIT)
-#define MRBC_ALLOC_MEMSIZE_T	uint32_t
+#elif defined(ESTALLOC_24BIT)
+#define ESTALLOC_MEMSIZE_T  uint32_t
 
 typedef struct USED_BLOCK {
-#if defined(MRBC_ALLOC_VMID)
-  MRBC_ALLOC_MEMSIZE_T size : 24;	//!< block size, header included
-  uint8_t	       vm_id : 8;	//!< mruby/c VM ID
-#else
-  MRBC_ALLOC_MEMSIZE_T size;
-#endif
+  ESTALLOC_MEMSIZE_T size;
+  uint8_t pad[2];  // for alignment compatibility on 16bit and 32bit machines
 } USED_BLOCK;
 
 typedef struct FREE_BLOCK {
-#if defined(MRBC_ALLOC_VMID)
-  MRBC_ALLOC_MEMSIZE_T size : 24;	//!< block size, header included
-  uint8_t	       vm_id : 8;	//!< dummy
-#else
-  MRBC_ALLOC_MEMSIZE_T size;
-#endif
+  ESTALLOC_MEMSIZE_T size;
 
   struct FREE_BLOCK *next_free;
   struct FREE_BLOCK *prev_free;
-  struct FREE_BLOCK *top_adrs;		//!< dummy for calculate sizeof(FREE_BLOCK)
+  struct FREE_BLOCK *top_adrs;    //!< dummy for calculate sizeof(FREE_BLOCK)
 } FREE_BLOCK;
 
-#else
-# error 'define MRBC_ALLOC_*' required.
 #endif
 
 /*
   and operation macro
 */
-#define BLOCK_SIZE(p)		(((p)->size) & ~0x03)
-#define PHYS_NEXT(p)		((void *)((uint8_t *)(p) + BLOCK_SIZE(p)))
-#define SET_USED_BLOCK(p)	((p)->size |=  0x01)
-#define SET_FREE_BLOCK(p)	((p)->size &= ~0x01)
-#define IS_USED_BLOCK(p)	((p)->size &   0x01)
-#define IS_FREE_BLOCK(p)	(!IS_USED_BLOCK(p))
-#define SET_PREV_USED(p)	((p)->size |=  0x02)
-#define SET_PREV_FREE(p)	((p)->size &= ~0x02)
-#define IS_PREV_USED(p)		((p)->size &   0x02)
-#define IS_PREV_FREE(p)		(!IS_PREV_USED(p))
-
-#if defined(MRBC_ALLOC_VMID)
-#define SET_VM_ID(p,id)	(((USED_BLOCK *)(p))->vm_id = (id))
-#define GET_VM_ID(p)	(((USED_BLOCK *)(p))->vm_id)
-
-#else
-#define SET_VM_ID(p,id)	((void)0)
-#define GET_VM_ID(p)	0
-#endif
+#define BLOCK_SIZE(p)       (((p)->size) & ~ALIGNMENT_MASK)
+#define PHYS_NEXT(p)        ((void *)((uint8_t *)(p) + BLOCK_SIZE(p)))
+#define SET_USED_BLOCK(p)   ((p)->size |=  0x01)
+#define SET_FREE_BLOCK(p)   ((p)->size &= ~0x01)
+#define IS_USED_BLOCK(p)    ((p)->size &   0x01)
+#define IS_FREE_BLOCK(p)    (!IS_USED_BLOCK(p))
+#define SET_PREV_USED(p)    ((p)->size |=  0x02)
+#define SET_PREV_FREE(p)    ((p)->size &= ~0x02)
+#define IS_PREV_USED(p)     ((p)->size &   0x02)
+#define IS_PREV_FREE(p)     (!IS_PREV_USED(p))
 
 
 /*
   define memory pool header
 */
 typedef struct MEMORY_POOL {
-  MRBC_ALLOC_MEMSIZE_T size;
+  ESTALLOC est;
+
+  ESTALLOC_MEMSIZE_T size;
 
   // free memory bitmap
   uint16_t free_fli_bitmap;
-  uint8_t  free_sli_bitmap[MRBC_ALLOC_FLI_BIT_WIDTH +1+1];
-						// +1=bit_width, +1=sentinel
+  uint8_t  free_sli_bitmap[ESTALLOC_FLI_BIT_WIDTH +1 +1]; // +1=bit_width, +1=sentinel
   uint8_t  pad[3]; // for alignment compatibility on 16bit and 32bit machines
 
   // free memory block index
-  FREE_BLOCK *free_blocks[SIZE_FREE_BLOCKS +1];	// +1=sentinel
+  FREE_BLOCK *free_blocks[SIZE_FREE_BLOCKS +1];  // +1=sentinel
 } MEMORY_POOL;
 
 #define BPOOL_TOP(memory_pool) ((void *)((uint8_t *)(memory_pool) + sizeof(MEMORY_POOL)))
@@ -224,33 +219,31 @@ typedef struct MEMORY_POOL {
 #define NLZ_SLI(x) nlz8(x)
 
 
-/***** Function prototypes **************************************************/
-/***** Local variables ******************************************************/
-// memory pool
-static MEMORY_POOL *memory_pool;
-
-#if defined(MRBC_USE_ALLOC_PROF)
-static int profiling = 0;
-static struct MRBC_ALLOC_PROF alloc_prof = {0, 0, 0};
+#if defined(ESTALLOC_DEBUG)
+static void take_profile(ESTALLOC *est);
+# define PROFILE() do { \
+    if (est->prof.profiling) take_profile(est); \
+  } while(0)
+#else
+# define PROFILE()
 #endif
 
-/***** Global variables *****************************************************/
-/***** Signal catching functions ********************************************/
-/***** Local functions ******************************************************/
+
 //================================================================
 /*! Number of leading zeros. 16bit version.
 
-  @param  x	target (16bit unsigned)
-  @retval int	nlz value
+  @param  x  target (16bit unsigned)
+  @retval int  nlz value
 */
-static inline int nlz16(uint16_t x)
+static inline int
+nlz16(uint16_t x)
 {
-  if( x == 0 ) return 16;
+  if (x == 0 ) return 16;
 
   int n = 1;
-  if((x >>  8) == 0 ) { n += 8; x <<= 8; }
-  if((x >> 12) == 0 ) { n += 4; x <<= 4; }
-  if((x >> 14) == 0 ) { n += 2; x <<= 2; }
+  if((x >>  8) == 0) { n += 8; x <<= 8; }
+  if((x >> 12) == 0) { n += 4; x <<= 4; }
+  if((x >> 14) == 0) { n += 2; x <<= 2; }
   return n - (x >> 15);
 }
 
@@ -258,16 +251,17 @@ static inline int nlz16(uint16_t x)
 //================================================================
 /*! Number of leading zeros. 8bit version.
 
-  @param  x	target (8bit unsigned)
-  @retval int	nlz value
+  @param  x  target (8bit unsigned)
+  @retval int  nlz value
 */
-static inline int nlz8(uint8_t x)
+static inline int
+nlz8(uint8_t x)
 {
-  if( x == 0 ) return 8;
+  if (x == 0 ) return 8;
 
   int n = 1;
-  if((x >> 4) == 0 ) { n += 4; x <<= 4; }
-  if((x >> 6) == 0 ) { n += 2; x <<= 2; }
+  if((x >> 4) == 0) { n += 4; x <<= 4; }
+  if((x >> 6) == 0) { n += 2; x <<= 2; }
   return n - (x >> 7);
 }
 
@@ -275,31 +269,31 @@ static inline int nlz8(uint8_t x)
 //================================================================
 /*! calc f and s, and returns fli,sli of free_blocks
 
-  @param  alloc_size	alloc size
-  @retval unsigned int	index of free_blocks
+  @param  alloc_size  alloc size
+  @retval unsigned int  index of free_blocks
 */
-static inline unsigned int calc_index(MRBC_ALLOC_MEMSIZE_T alloc_size)
+static inline unsigned int
+calc_index(ESTALLOC_MEMSIZE_T alloc_size)
 {
   // check overflow
-  if( (alloc_size >> (MRBC_ALLOC_FLI_BIT_WIDTH
-                      + MRBC_ALLOC_SLI_BIT_WIDTH
-                      + MRBC_ALLOC_IGNORE_LSBS)) != 0) {
+  if ((alloc_size >> (ESTALLOC_FLI_BIT_WIDTH
+                      + ESTALLOC_SLI_BIT_WIDTH
+                      + ESTALLOC_IGNORE_LSBS)) != 0) {
     return SIZE_FREE_BLOCKS - 1;
   }
 
   // calculate First Level Index.
-  unsigned int fli = 16 -
-    nlz16( alloc_size >> (MRBC_ALLOC_SLI_BIT_WIDTH + MRBC_ALLOC_IGNORE_LSBS) );
+  unsigned int fli = 16 - nlz16( alloc_size >> (ESTALLOC_SLI_BIT_WIDTH + ESTALLOC_IGNORE_LSBS));
 
   // calculate Second Level Index.
-  unsigned int shift = (fli == 0) ? MRBC_ALLOC_IGNORE_LSBS :
-                                   (MRBC_ALLOC_IGNORE_LSBS - 1 + fli);
+  unsigned int shift = (fli == 0) ? ESTALLOC_IGNORE_LSBS :
+                                   (ESTALLOC_IGNORE_LSBS - 1 + fli);
 
-  unsigned int sli = (alloc_size >> shift) & ((1 << MRBC_ALLOC_SLI_BIT_WIDTH) - 1);
-  unsigned int index = (fli << MRBC_ALLOC_SLI_BIT_WIDTH) + sli;
+  unsigned int sli = (alloc_size >> shift) & ((1 << ESTALLOC_SLI_BIT_WIDTH) - 1);
+  unsigned int index = (fli << ESTALLOC_SLI_BIT_WIDTH) + sli;
 
-  assert(fli <= MRBC_ALLOC_FLI_BIT_WIDTH);
-  assert(sli <= (1 << MRBC_ALLOC_SLI_BIT_WIDTH) - 1);
+  assert(fli <= ESTALLOC_FLI_BIT_WIDTH);
+  assert(sli <= (1 << ESTALLOC_SLI_BIT_WIDTH) - 1);
 
   return index;
 }
@@ -308,10 +302,11 @@ static inline unsigned int calc_index(MRBC_ALLOC_MEMSIZE_T alloc_size)
 //================================================================
 /*! Mark that block free and register it in the free index table.
 
-  @param  pool		Pointer to memory pool.
-  @param  target	Pointer to target block.
+  @param  pool    Pointer to memory pool.
+  @param  target  Pointer to target block.
 */
-static void add_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
+static void
+add_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
 {
   SET_FREE_BLOCK(target);
 
@@ -321,14 +316,14 @@ static void add_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
   unsigned int index = calc_index(BLOCK_SIZE(target));
   unsigned int fli = FLI(index);
   unsigned int sli = SLI(index);
-  assert( index < SIZE_FREE_BLOCKS );
+  assert(index < SIZE_FREE_BLOCKS);
 
   pool->free_fli_bitmap      |= (MSB_BIT1_FLI >> fli);
   pool->free_sli_bitmap[fli] |= (MSB_BIT1_SLI >> sli);
 
   target->prev_free = NULL;
   target->next_free = pool->free_blocks[index];
-  if( target->next_free != NULL ) {
+  if (target->next_free != NULL) {
     target->next_free->prev_free = target;
   }
   pool->free_blocks[index] = target;
@@ -338,75 +333,53 @@ static void add_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
 //================================================================
 /*! just remove the free_block *target from index
 
-  @param  pool		Pointer to memory pool.
-  @param  target	pointer to target block.
+  @param  pool    Pointer to memory pool.
+  @param  target  pointer to target block.
 */
-static void remove_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
+static void
+remove_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
 {
   // top of linked list?
-  if( target->prev_free == NULL ) {
+  if (target->prev_free == NULL) {
     unsigned int index = calc_index(BLOCK_SIZE(target));
 
     pool->free_blocks[index] = target->next_free;
-    if( target->next_free == NULL ) {
+    if (target->next_free == NULL) {
       unsigned int fli = FLI(index);
       unsigned int sli = SLI(index);
       pool->free_sli_bitmap[fli] &= ~(MSB_BIT1_SLI >> sli);
-      if( pool->free_sli_bitmap[fli] == 0 ) pool->free_fli_bitmap &= ~(MSB_BIT1_FLI >> fli);
+      if (pool->free_sli_bitmap[fli] == 0 ) pool->free_fli_bitmap &= ~(MSB_BIT1_FLI >> fli);
     }
   }
   else {
     target->prev_free->next_free = target->next_free;
   }
 
-  if( target->next_free != NULL ) {
+  if (target->next_free != NULL) {
     target->next_free->prev_free = target->prev_free;
   }
 }
 
 
-#if defined(MRBC_USE_ALLOC_PROF)
-//================================================================
-/*! Record current memory usage for profiling
-*/
-static void alloc_profile(void)
-{
-  if (!profiling) return;
-
-  MEMORY_POOL *pool = memory_pool;
-  USED_BLOCK *block = BPOOL_TOP(pool);
-  unsigned int used = 0;
-
-  while (block < (USED_BLOCK *)BPOOL_END(pool)) {
-    if (!IS_FREE_BLOCK(block)) {
-      used += BLOCK_SIZE(block);
-    }
-    block = PHYS_NEXT(block);
-  }
-
-  if (alloc_prof.max < used) alloc_prof.max = used;
-  if (used < alloc_prof.min) alloc_prof.min = used;
-}
-#endif
-
 //================================================================
 /*! Split block by size
 
-  @param  target	pointer to target block
-  @param  size		size
-  @retval NULL		no split.
-  @retval FREE_BLOCK *	pointer to splitted free block.
+  @param  target  pointer to target block
+  @param  size    size
+  @retval NULL    no split.
+  @retval FREE_BLOCK *  pointer to splitted free block.
 */
-static inline FREE_BLOCK* split_block(FREE_BLOCK *target, MRBC_ALLOC_MEMSIZE_T size)
+static inline FREE_BLOCK *
+split_block(FREE_BLOCK *target, ESTALLOC_MEMSIZE_T size)
 {
-  assert( BLOCK_SIZE(target) >= size );
-  if( (BLOCK_SIZE(target) - size) <= MRBC_MIN_MEMORY_BLOCK_SIZE ) return NULL;
+  assert(BLOCK_SIZE(target) >= size);
+  if ((BLOCK_SIZE(target) - size) <= ESTALLOC_MIN_MEMORY_BLOCK_SIZE) return NULL;
 
   // split block, free
   FREE_BLOCK *split = (FREE_BLOCK *)((uint8_t *)target + size);
 
   split->size  = BLOCK_SIZE(target) - size;
-  target->size = size | (target->size & 0x03);	// copy a size with flags.
+  target->size = size | (target->size & ALIGNMENT_MASK);  // copy a size with flags.
 
   return split;
 }
@@ -416,15 +389,16 @@ static inline FREE_BLOCK* split_block(FREE_BLOCK *target, MRBC_ALLOC_MEMSIZE_T s
 /*! merge target and next block.
     next will disappear
 
-  @param  target	pointer to free block 1
-  @param  next	pointer to free block 2
+  @param  target  pointer to free block 1
+  @param  next  pointer to free block 2
 */
-static inline void merge_block(FREE_BLOCK *target, FREE_BLOCK *next)
+static inline
+void merge_block(FREE_BLOCK *target, FREE_BLOCK *next)
 {
   assert(target < next);
 
   // merge target and next
-  target->size += BLOCK_SIZE(next);		// copy a size but save flags.
+  target->size += BLOCK_SIZE(next);    // copy a size but save flags.
 }
 
 
@@ -432,81 +406,90 @@ static inline void merge_block(FREE_BLOCK *target, FREE_BLOCK *next)
 //================================================================
 /*! initialize
 
-  @param  ptr	pointer to free memory block.
-  @param  size	size. (max 64KB. see MRBC_ALLOC_MEMSIZE_T)
+  @param  ptr  pointer to free memory block.
+  @param  size  size. (max 64KB. see ESTALLOC_MEMSIZE_T)
 */
-void mrbc_init_alloc(void *ptr, unsigned int size)
+ESTALLOC *
+est_init(void *ptr, unsigned int size)
 {
-  assert( MRBC_MIN_MEMORY_BLOCK_SIZE >= sizeof(FREE_BLOCK) );
-  assert( MRBC_MIN_MEMORY_BLOCK_SIZE >= (1 << MRBC_ALLOC_IGNORE_LSBS) );
+  assert(ESTALLOC_MIN_MEMORY_BLOCK_SIZE >= sizeof(FREE_BLOCK));
+  assert(ESTALLOC_MIN_MEMORY_BLOCK_SIZE >= (1 << ESTALLOC_IGNORE_LSBS));
   /*
     If you get this assertion, you can change minimum memory block size
-    parameter to `MRBC_MIN_MEMORY_BLOCK_SIZE (1 << MRBC_ALLOC_IGNORE_LSBS)`
-    and #define MRBC_ALLOC_16BIT.
+    parameter to `ESTALLOC_MIN_MEMORY_BLOCK_SIZE (1 << ESTALLOC_IGNORE_LSBS)`
+    and #define ESTALLOC_16BIT.
   */
 
-  assert( (sizeof(MEMORY_POOL) & 0x03) == 0 );
+  assert((sizeof(MEMORY_POOL) & ALIGNMENT_MASK) == 0);
 #if defined(UINTPTR_MAX)
-  assert( ((uintptr_t)ptr & 0x03) == 0 );
+  assert(((uintptr_t)ptr & ALIGNMENT_MASK) == 0);
 #else
-  assert( ((uint32_t)ptr & 0x03) == 0 );
+  assert(((uint32_t)ptr & ALIGNMENT_MASK) == 0);
 #endif
-  assert( size != 0 );
-  assert( size <= (MRBC_ALLOC_MEMSIZE_T)(~0) );
+  assert(size != 0);
+  assert(size <= (ESTALLOC_MEMSIZE_T)(~0));
 
-  size &= ~(unsigned int)0x03;	// align 4 byte.
-  memory_pool = ptr;
-  memset( memory_pool, 0, sizeof(MEMORY_POOL) );
+  size &= ~(unsigned int)ALIGNMENT_MASK;
+
+  MEMORY_POOL zero_pool = {0};
+  MEMORY_POOL *memory_pool = (MEMORY_POOL *)ptr;
+  *memory_pool = zero_pool;
   memory_pool->size = size;
 
   // initialize memory pool
   //  large free block + zero size used block (sentinel).
-  MRBC_ALLOC_MEMSIZE_T sentinel_size = sizeof(USED_BLOCK);
-  sentinel_size += (-sentinel_size & 0x03);
-  MRBC_ALLOC_MEMSIZE_T free_size = size - sizeof(MEMORY_POOL) - sentinel_size;
+  ESTALLOC_MEMSIZE_T sentinel_size = sizeof(USED_BLOCK);
+  sentinel_size += (-sentinel_size & ALIGNMENT_MASK);
+  ESTALLOC_MEMSIZE_T free_size = size - sizeof(MEMORY_POOL) - sentinel_size;
   FREE_BLOCK *free_block = BPOOL_TOP(memory_pool);
   USED_BLOCK *used_block = (USED_BLOCK *)((uint8_t *)free_block + free_size);
 
-  free_block->size = free_size | 0x02;		// flag prev=1, used=0
-  used_block->size = sentinel_size | 0x01;	// flag prev=0, used=1
-  SET_VM_ID( used_block, 0xff );
+  free_block->size = free_size | 0x02;      // flag prev=1, used=0
+  used_block->size = sentinel_size | 0x01;  // flag prev=0, used=1
 
-  add_free_block( memory_pool, free_block );
+  add_free_block(memory_pool, free_block);
+
+  return (ESTALLOC *)memory_pool;
 }
 
 
 //================================================================
 /*! cleanup memory pool
 */
-void mrbc_cleanup_alloc(void)
+void
+est_cleanup(ESTALLOC *est)
 {
-#if defined(MRBC_DEBUG)
-  if( memory_pool ) {
-    memset( memory_pool, 0, memory_pool->size );
+#if defined(ESTALLOC_DEBUG)
+  MEMORY_POOL *memory_pool = (MEMORY_POOL *)est;
+  char *p = (char *)est;
+  if (p) {
+    for (unsigned int i = 0; i < memory_pool->size; i++) {
+      p[i] = 0;
+    }
   }
+#else
+  (void)est;
 #endif
-
-  memory_pool = 0;
 }
 
 
 //================================================================
 /*! allocate memory
 
-  @param  size	request size.
+  @param  size  request size.
   @return void * pointer to allocated memory.
-  @retval NULL	error.
+  @retval NULL  Out of memory.
 */
-void * mrbc_raw_alloc(unsigned int size)
+void *
+est_malloc(ESTALLOC *est, unsigned int size)
 {
-  MEMORY_POOL *pool = memory_pool;
-  MRBC_ALLOC_MEMSIZE_T alloc_size = size + sizeof(USED_BLOCK);
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
+  ESTALLOC_MEMSIZE_T alloc_size = size + sizeof(USED_BLOCK);
 
-  // align 4 byte
-  alloc_size += (-alloc_size & 3);
+  alloc_size += (-alloc_size & ALIGNMENT_MASK);
 
   // check minimum alloc size.
-  if( alloc_size < MRBC_MIN_MEMORY_BLOCK_SIZE ) alloc_size = MRBC_MIN_MEMORY_BLOCK_SIZE;
+  if (alloc_size < ESTALLOC_MIN_MEMORY_BLOCK_SIZE ) alloc_size = ESTALLOC_MIN_MEMORY_BLOCK_SIZE;
 
   FREE_BLOCK *target;
   unsigned int fli, sli;
@@ -516,7 +499,7 @@ void * mrbc_raw_alloc(unsigned int size)
   // because it immediately responds to the pattern in which
   // same size memory are allocated and released continuously.
   target = pool->free_blocks[index];
-  if( target && BLOCK_SIZE(target) >= alloc_size ) {
+  if (target && BLOCK_SIZE(target) >= alloc_size) {
     fli = FLI(index);
     sli = SLI(index);
     goto FOUND_TARGET_BLOCK;
@@ -526,57 +509,53 @@ void * mrbc_raw_alloc(unsigned int size)
   target = pool->free_blocks[++index];
   fli = FLI(index);
   sli = SLI(index);
-  if( target ) goto FOUND_TARGET_BLOCK;
+  if (target) goto FOUND_TARGET_BLOCK;
 
   // check in SLI bitmap table.
   uint16_t masked = pool->free_sli_bitmap[fli] & ((MSB_BIT1_SLI >> sli) - 1);
-  if( masked != 0 ) {
-    sli = NLZ_SLI( masked );
+  if (masked != 0) {
+    sli = NLZ_SLI(masked);
     goto FOUND_FLI_SLI;
   }
 
   // check in FLI bitmap table.
   masked = pool->free_fli_bitmap & ((MSB_BIT1_FLI >> fli) - 1);
-  if( masked != 0 ) {
-    fli = NLZ_FLI( masked );
-    sli = NLZ_SLI( pool->free_sli_bitmap[fli] );
+  if (masked != 0) {
+    fli = NLZ_FLI(masked);
+    sli = NLZ_SLI(pool->free_sli_bitmap[fli]);
     goto FOUND_FLI_SLI;
   }
 
   // Change strategy to First-fit.
   target = pool->free_blocks[--index];
-  while( target ) {
-    if( BLOCK_SIZE(target) >= alloc_size ) {
-      remove_free_block( pool, target );
+  while (target) {
+    if (BLOCK_SIZE(target) >= alloc_size) {
+      remove_free_block( pool, target);
       goto SPLIT_BLOCK;
     }
     target = target->next_free;
   }
 
   // else out of memory
-#if defined(MRBC_OUT_OF_MEMORY)
-  MRBC_OUT_OF_MEMORY();
-#else
-  static const char msg[] = "Fatal error: Out of memory.\n";
-  hal_write(2, msg, sizeof(msg)-1);
-#endif
-  return NULL;  // ENOMEM
-
+  return NULL;
 
  FOUND_FLI_SLI:
-  index = (fli << MRBC_ALLOC_SLI_BIT_WIDTH) + sli;
-  assert( index < SIZE_FREE_BLOCKS );
+  index = (fli << ESTALLOC_SLI_BIT_WIDTH) + sli;
+  assert(index <= SIZE_FREE_BLOCKS);
   target = pool->free_blocks[index];
-  assert( target != NULL );
+  //assert(target != NULL);
+  if (target == NULL) {
+    return NULL;
+  }
 
  FOUND_TARGET_BLOCK:
   assert(BLOCK_SIZE(target) >= alloc_size);
 
   // remove free_blocks index
   pool->free_blocks[index] = target->next_free;
-  if( target->next_free == NULL ) {
+  if (target->next_free == NULL) {
     pool->free_sli_bitmap[fli] &= ~(MSB_BIT1_SLI >> sli);
-    if( pool->free_sli_bitmap[fli] == 0 ) pool->free_fli_bitmap &= ~(MSB_BIT1_FLI >> fli);
+    if (pool->free_sli_bitmap[fli] == 0 ) pool->free_fli_bitmap &= ~(MSB_BIT1_FLI >> fli);
   }
   else {
     target->next_free->prev_free = NULL;
@@ -584,9 +563,9 @@ void * mrbc_raw_alloc(unsigned int size)
 
  SPLIT_BLOCK: {
     FREE_BLOCK *release = split_block(target, alloc_size);
-    if( release != NULL ) {
+    if (release != NULL) {
       SET_PREV_USED(release);
-      add_free_block( pool, release );
+      add_free_block(pool, release);
     } else {
       FREE_BLOCK *next = PHYS_NEXT(target);
       SET_PREV_USED(next);
@@ -594,16 +573,15 @@ void * mrbc_raw_alloc(unsigned int size)
   }
 
   SET_USED_BLOCK(target);
-  SET_VM_ID( target, 0 );
 
-#if defined(MRBC_DEBUG)
-  memset( (uint8_t *)target + sizeof(USED_BLOCK), 0xaa,
-          BLOCK_SIZE(target) - sizeof(USED_BLOCK) );
+#if defined(ESTALLOC_DEBUG)
+  char *p = (char *)target;
+  for (unsigned int i = 0; i < alloc_size - sizeof(USED_BLOCK); i++) {
+    p[sizeof(USED_BLOCK) + i] = 0xaa;
+  }
 #endif
 
-#if defined(MRBC_USE_ALLOC_PROF)
-  alloc_profile();
-#endif
+  PROFILE();
 
   return (uint8_t *)target + sizeof(USED_BLOCK);
 }
@@ -612,14 +590,15 @@ void * mrbc_raw_alloc(unsigned int size)
 //================================================================
 /*! allocate memory that cannot free and realloc
 
-  @param  size	request size.
+  @param  size  request size.
   @return void * pointer to allocated memory.
-  @retval NULL	error.
+  @retval NULL  error.
 */
-void * mrbc_raw_alloc_no_free(unsigned int size)
+void *
+est_permalloc(ESTALLOC *est, unsigned int size)
 {
-  MEMORY_POOL *pool = memory_pool;
-  MRBC_ALLOC_MEMSIZE_T alloc_size = size + (-size & 3);	// align 4 byte
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
+  ESTALLOC_MEMSIZE_T alloc_size = size + (-size & ALIGNMENT_MASK);
 
   // find the tail block
   FREE_BLOCK *tail = BPOOL_TOP(pool);
@@ -627,39 +606,41 @@ void * mrbc_raw_alloc_no_free(unsigned int size)
   do {
     prev = tail;
     tail = PHYS_NEXT(tail);
-  } while( PHYS_NEXT(tail) < BPOOL_END(pool) );
+  } while (PHYS_NEXT(tail) < BPOOL_END(pool));
 
   // can resize it block?
-  if( IS_USED_BLOCK(prev) ) goto FALLBACK;
-  if( (BLOCK_SIZE(prev) - sizeof(USED_BLOCK)) < alloc_size ) goto FALLBACK;
+  if (IS_USED_BLOCK(prev) ) goto FALLBACK;
+  if ((BLOCK_SIZE(prev) - sizeof(USED_BLOCK)) < alloc_size ) goto FALLBACK;
 
-  remove_free_block( pool, prev );
-  MRBC_ALLOC_MEMSIZE_T free_size = BLOCK_SIZE(prev) - alloc_size;
+  remove_free_block( pool, prev);
+  ESTALLOC_MEMSIZE_T free_size = BLOCK_SIZE(prev) - alloc_size;
 
-  if( free_size <= MRBC_MIN_MEMORY_BLOCK_SIZE ) {
+  if (free_size <= ESTALLOC_MIN_MEMORY_BLOCK_SIZE) {
     // no split, use all
     prev->size += BLOCK_SIZE(tail);
-    SET_USED_BLOCK( prev );
+    SET_USED_BLOCK( prev);
     tail = prev;
   }
   else {
     // split block
-    MRBC_ALLOC_MEMSIZE_T tail_size = tail->size + alloc_size;	// w/ flags.
+    ESTALLOC_MEMSIZE_T tail_size = tail->size + alloc_size;  // w/ flags.
     tail = (FREE_BLOCK*)((uint8_t *)tail - alloc_size);
     tail->size = tail_size;
-    prev->size -= alloc_size;		// w/ flags.
-    add_free_block( pool, prev );
+    prev->size -= alloc_size;    // w/ flags.
+    add_free_block( pool, prev);
 
-#if defined(MRBC_DEBUG)
-    memset( (uint8_t *)tail + sizeof(USED_BLOCK), 0xaa, alloc_size );
+#if defined(ESTALLOC_DEBUG)
+    char *p = (char *)tail;
+    for (unsigned int i = 0; i < alloc_size; i++) {
+      p[sizeof(USED_BLOCK) + i] = 0xaa;
+    }
 #endif
   }
-  SET_VM_ID( tail, 0xff );
 
   return (uint8_t *)tail + sizeof(USED_BLOCK);
 
  FALLBACK:
-  return mrbc_raw_alloc(alloc_size);
+  return est_malloc(est, size);
 }
 
 
@@ -671,13 +652,13 @@ void * mrbc_raw_alloc_no_free(unsigned int size)
   @return void * pointer to allocated memory.
   @retval NULL   error.
 */
-void * mrbc_raw_calloc(unsigned int nmemb, unsigned int size)
+void *
+est_calloc(ESTALLOC *est, unsigned int nmemb, unsigned int size)
 {
   unsigned int total_size = nmemb * size;
-  void* ptr = mrbc_raw_alloc(total_size);
+  void* ptr = est_malloc(est, total_size);
   if (ptr != NULL) {
-    // Instead of using memset and memset_s (not available in C99),
-    // we use a volatile pointer to prevent unexpected optimization.
+    // Use a volatile pointer to prevent unexpected optimization.
     volatile unsigned char *vptr = (volatile unsigned char *)ptr;
     while (total_size--) {
       *vptr++ = 0;
@@ -690,68 +671,54 @@ void * mrbc_raw_calloc(unsigned int nmemb, unsigned int size)
 //================================================================
 /*! release memory
 
-  @param  ptr	Return value of mrbc_raw_alloc()
+  @param  ptr  Return value of est_malloc()
 */
-void mrbc_raw_free(void *ptr)
+void
+est_free(ESTALLOC *est, void *ptr)
 {
-  MEMORY_POOL *pool = memory_pool;
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
 
-#if defined(MRBC_DEBUG)
+  if (ptr == NULL) return;
+
+#if defined(ESTALLOC_DEBUG)
   {
-    if( ptr == NULL ) {
-      static const char msg[] = "mrbc_raw_free(): NULL pointer was given.\n";
-      hal_write(2, msg, sizeof(msg)-1);
-      return;
-    }
-
     FREE_BLOCK *target = BLOCK_ADRS(ptr);
-    if( target < (FREE_BLOCK *)BPOOL_TOP(pool) ||
-	target > (FREE_BLOCK *)BPOOL_END(pool) ) {
-      static const char msg[] = "mrbc_raw_free(): Outside memory pool address was specified.\n";
-      hal_write(2, msg, sizeof(msg)-1);
+    if (target < (FREE_BLOCK *)BPOOL_TOP(pool) || target > (FREE_BLOCK *)BPOOL_END(pool)) {
+      est->error_message = "est_free(): Outside memory pool address was specified.\n";
       return;
     }
-
     FREE_BLOCK *block = BPOOL_TOP(pool);
     while(1) {
-      if( block == target ) break;
-      if( PHYS_NEXT(block) >= BPOOL_END(pool) ) break;
+      if (block == target ) break;
+      if (PHYS_NEXT(block) >= BPOOL_END(pool) ) break;
       block = PHYS_NEXT(block);
     }
-
-    if( block == target ) {
-      // found target block.
-      if( IS_FREE_BLOCK(block) ) {  // is Free block?
-        static const char msg[] = "mrbc_raw_free(): double free detected.\n";
-        hal_write(2, msg, sizeof(msg)-1);
+    if (block == target) {
+      // Found target block.
+      if (IS_FREE_BLOCK(block)) {
+        est->error_message = "est_free(): double free detected.\n";
         return;
       }
-
-      if( PHYS_NEXT(block) >= BPOOL_END(pool) ) {  // Is this a sentinel?
-        static const char msg[] = "mrbc_raw_free(): no_free address was specified.\n";
-        hal_write(2, msg, sizeof(msg)-1);
+      if (PHYS_NEXT(block) >= BPOOL_END(pool)) {  // reach to sentinel
+        est->error_message = "est_free(): permalloc address was specified.\n";
         return;
       }
-
     } else {
-      // not found target block.
-      if( block < target ) {
-	static const char msg[] = "mrbc_raw_free(): no_free address was specified.\n";
-	hal_write(2, msg, sizeof(msg)-1);
-	return;
+      // Not found target block.
+      if (block < target) {
+        est->error_message = "est_free(): permalloc address was specified.\n";
+        return;
       }
-
-      static const char msg[] = "mrbc_raw_free(): Illegal address.\n";
-      hal_write(2, msg, sizeof(msg)-1);
+      est->error_message = "est_free(): Illegal address.\n";
       return;
     }
-
-    SET_VM_ID( target, 0xff );
-    memset( ptr, 0xff, BLOCK_SIZE(target) - sizeof(USED_BLOCK) );
+    char *p = (char *)ptr;
+    for (unsigned int i = 0; i < BLOCK_SIZE(target) - sizeof(USED_BLOCK); i++) {
+      p[i] = 0xff;
+    }
+    est->error_message = NULL;
   }
 #endif
-
-  if( ptr == NULL ) return;
 
   // get target block
   FREE_BLOCK *target = BLOCK_ADRS(ptr);
@@ -759,107 +726,97 @@ void mrbc_raw_free(void *ptr)
   // check next block, merge?
   FREE_BLOCK *next = PHYS_NEXT(target);
 
-  if( IS_FREE_BLOCK(next) ) {
-    remove_free_block( pool, next );
+  if (IS_FREE_BLOCK(next)) {
+    remove_free_block( pool, next);
     merge_block(target, next);
   } else {
     SET_PREV_FREE(next);
   }
 
   // check prev block, merge?
-  if( IS_PREV_FREE(target) ) {
+  if (IS_PREV_FREE(target)) {
     FREE_BLOCK *prev = *((FREE_BLOCK **)((uint8_t*)target - sizeof(FREE_BLOCK *)));
 
-    assert( IS_FREE_BLOCK(prev) );
-    remove_free_block( pool, prev );
+    assert(IS_FREE_BLOCK(prev));
+    remove_free_block( pool, prev);
     merge_block(prev, target);
     target = prev;
   }
 
   // target, add to index
-  add_free_block( pool, target );
+  add_free_block( pool, target);
 
-#if defined(MRBC_USE_ALLOC_PROF)
-  alloc_profile();
-#endif
+  PROFILE();
 }
 
 
 //================================================================
 /*! re-allocate memory
 
-  @param  ptr	Return value of mrbc_raw_alloc()
-  @param  size	request size
+  @param  ptr  Return value of est_malloc()
+  @param  size  request size
   @return void * pointer to allocated memory.
-  @retval NULL	error.
+  @retval NULL  error.
 */
-void * mrbc_raw_realloc(void *ptr, unsigned int size)
+void *
+est_realloc(ESTALLOC *est, void *ptr, unsigned int size)
 {
-  if (ptr != NULL && size == 0) {
-    mrbc_raw_free(ptr);
-    return NULL;
-  }
+  if (ptr == NULL) return est_malloc(est, size);
 
-  MEMORY_POOL *pool = memory_pool;
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
   volatile USED_BLOCK *target = BLOCK_ADRS(ptr);
-  MRBC_ALLOC_MEMSIZE_T alloc_size = size + sizeof(USED_BLOCK);
+  ESTALLOC_MEMSIZE_T alloc_size = size + sizeof(USED_BLOCK);
   FREE_BLOCK *next;
 
-  // align 4 byte
-  alloc_size += (-alloc_size & 3);
+  alloc_size += (-alloc_size & ALIGNMENT_MASK);
 
   // check minimum alloc size.
-  if( alloc_size < MRBC_MIN_MEMORY_BLOCK_SIZE ) alloc_size = MRBC_MIN_MEMORY_BLOCK_SIZE;
+  if (alloc_size < ESTALLOC_MIN_MEMORY_BLOCK_SIZE ) alloc_size = ESTALLOC_MIN_MEMORY_BLOCK_SIZE;
 
   // expand? part1.
   // next phys block is free and enough size?
-  if( alloc_size > BLOCK_SIZE(target) ) {
+  if (alloc_size > BLOCK_SIZE(target)) {
     next = PHYS_NEXT(target);
-    if( IS_USED_BLOCK(next) ) goto ALLOC_AND_COPY;
-    if( (BLOCK_SIZE(target) + BLOCK_SIZE(next)) < alloc_size ) goto ALLOC_AND_COPY;
+    if (IS_USED_BLOCK(next)) goto ALLOC_AND_COPY;
+    if ((BLOCK_SIZE(target) + BLOCK_SIZE(next)) < alloc_size) goto ALLOC_AND_COPY;
 
-    remove_free_block( pool, next );
+    remove_free_block(pool, next);
     merge_block((FREE_BLOCK *)target, next);
   }
   next = PHYS_NEXT(target);
 
   // try shrink.
   FREE_BLOCK *release = split_block((FREE_BLOCK *)target, alloc_size);
-  if( release != NULL ) {
+  if (release != NULL) {
     SET_PREV_USED(release);
   } else {
     SET_PREV_USED(next);
-#if defined(MRBC_USE_ALLOC_PROF)
-    alloc_profile();
-#endif
+    PROFILE();
     return ptr;
   }
 
   // check next block, merge?
-  if( IS_FREE_BLOCK(next) ) {
-    remove_free_block( pool, next );
+  if (IS_FREE_BLOCK(next)) {
+    remove_free_block( pool, next);
     merge_block(release, next);
   } else {
     SET_PREV_FREE(next);
   }
-  add_free_block( pool, release );
-#if defined(MRBC_USE_ALLOC_PROF)
-  alloc_profile();
-#endif
+  add_free_block(pool, release);
+  PROFILE();
   return ptr;
-
 
   // expand part2.
   // new alloc and copy
  ALLOC_AND_COPY: {
-    void *new_ptr = mrbc_raw_alloc(size);
-    if( new_ptr == NULL ) return NULL;  // ENOMEM
-
-    memcpy(new_ptr, ptr, BLOCK_SIZE(target) - sizeof(USED_BLOCK));
-    mrbc_set_vm_id(new_ptr, target->vm_id);
-
-    mrbc_raw_free(ptr);
-
+    void *new_ptr = est_malloc(est, size);
+    if (new_ptr == NULL ) return NULL;  // ENOMEM
+    unsigned int copy_size = BLOCK_SIZE(target) - sizeof(USED_BLOCK);
+    if (size < copy_size) copy_size = size;
+    for (uint32_t i = 0; i < copy_size; i++) {
+      ((uint8_t *)new_ptr)[i] = ((uint8_t *)ptr)[i];
+    }
+    est_free(est, ptr);
     return new_ptr;
   }
 }
@@ -868,129 +825,44 @@ void * mrbc_raw_realloc(void *ptr, unsigned int size)
 //================================================================
 /*! allocated memory size
 
-  @param  ptr           Return value of mrbc_alloc()
+  @param  ptr           Return value of est_malloc()
   @retval unsigned int  pointer to allocated memory.
 */
-unsigned int mrbc_alloc_usable_size(void *ptr)
+unsigned int
+est_usable_size(ESTALLOC *est, void *ptr)
 {
+  (void)est;
   USED_BLOCK *target = BLOCK_ADRS(ptr);
   return (unsigned int)(BLOCK_SIZE(target) - sizeof(USED_BLOCK));
 }
 
 
-#if defined(MRBC_ALLOC_VMID)
-//================================================================
-/*! allocate memory
-
-  @param  vm	pointer to VM.
-  @param  size	request size.
-  @return void * pointer to allocated memory.
-  @retval NULL	error.
-*/
-void * mrbc_alloc(const struct VM *vm, unsigned int size)
-{
-  void *ptr = mrbc_raw_alloc(size);
-  if( ptr == NULL ) return NULL;	// ENOMEM
-
-  if( vm ) mrbc_set_vm_id(ptr, vm->vm_id);
-
-  return ptr;
-}
-
-
-//================================================================
-/*! allocate memory where zero-cleared out.
-
-  @param  vm     pointer to VM.
-  @param  nmemb  number of elements.
-  @param  size   size of an element.
-  @return void * pointer to allocated memory.
-  @retval NULL   error.
-*/
-void * mrbc_calloc(const struct VM *vm, unsigned int nmemb, unsigned int size)
-{
-  void *ptr = mrbc_raw_calloc(nmemb, size);
-  if( ptr == NULL ) return NULL;	// ENOMEM
-
-  if( vm ) mrbc_set_vm_id(ptr, vm->vm_id);
-
-  return ptr;
-}
-
-
-//================================================================
-/*! release memory, vm used.
-
-  @param  vm	pointer to VM.
-*/
-void mrbc_free_all(const struct VM *vm)
-{
-  MEMORY_POOL *pool = memory_pool;
-  USED_BLOCK *target = BPOOL_TOP(pool);
-  USED_BLOCK *next;
-  int vm_id = vm->vm_id;
-
-  while( target < (USED_BLOCK *)BPOOL_END(pool) ) {
-    next = PHYS_NEXT(target);
-    if( IS_FREE_BLOCK(next) ) next = PHYS_NEXT(next);
-
-    if( IS_USED_BLOCK(target) && (target->vm_id == vm_id) ) {
-      mrbc_raw_free( (uint8_t *)target + sizeof(USED_BLOCK) );
-    }
-    target = next;
-  }
-}
-
-
-//================================================================
-/*! set vm id
-
-  @param  ptr	Return value of mrbc_alloc()
-  @param  vm_id	vm id
-*/
-void mrbc_set_vm_id(void *ptr, int vm_id)
-{
-  SET_VM_ID( BLOCK_ADRS(ptr), vm_id );
-}
-
-
-//================================================================
-/*! get vm id
-
-  @param  ptr	Return value of mrbc_alloc()
-  @return int	vm id
-*/
-int mrbc_get_vm_id(void *ptr)
-{
-  return GET_VM_ID( BLOCK_ADRS(ptr) );
-}
-#endif	// defined(MRBC_ALLOC_VMID)
-
-
+#if defined(ESTALLOC_DEBUG)
 //================================================================
 /*! statistics
 
-  @param  ret		pointer to return value.
+  @param  est     Pointer to memory pool.
 */
-void mrbc_alloc_statistics( struct MRBC_ALLOC_STATISTICS *ret )
+void
+est_take_statistics(ESTALLOC *est)
 {
-  MEMORY_POOL *pool = memory_pool;
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
   USED_BLOCK *block = BPOOL_TOP(pool);
-  int flag_used_free = IS_USED_BLOCK(block);
+  uint32_t flag_used_free = IS_USED_BLOCK(block);
 
-  ret->total = pool->size;
-  ret->used = 0;
-  ret->free = 0;
-  ret->fragmentation = -1;
+  est->stat.total = pool->size;
+  est->stat.used = 0;
+  est->stat.free = 0;
+  est->stat.frag = -1;
 
-  while( block < (USED_BLOCK *)BPOOL_END(pool) ) {
-    if( IS_FREE_BLOCK(block) ) {
-      ret->free += BLOCK_SIZE(block);
+  while (block < (USED_BLOCK *)BPOOL_END(pool)) {
+    if (IS_FREE_BLOCK(block)) {
+      est->stat.free += BLOCK_SIZE(block) + sizeof(FREE_BLOCK);
     } else {
-      ret->used += BLOCK_SIZE(block);
+      est->stat.used += BLOCK_SIZE(block) + sizeof(USED_BLOCK);
     }
-    if( flag_used_free != IS_USED_BLOCK(block) ) {
-      ret->fragmentation++;
+    if (flag_used_free != IS_USED_BLOCK(block)) {
+      est->stat.frag++;
       flag_used_free = IS_USED_BLOCK(block);
     }
     block = PHYS_NEXT(block);
@@ -998,149 +870,210 @@ void mrbc_alloc_statistics( struct MRBC_ALLOC_STATISTICS *ret )
 }
 
 
-#if defined(MRBC_USE_ALLOC_PROF)
+//================================================================
+/*! Record current memory usage for profiling
+*/
+static void
+take_profile(ESTALLOC *est)
+{
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
+  ESTALLOC_PROF prof = est->prof;
+  USED_BLOCK *block = BPOOL_TOP(pool);
+  unsigned int used = 0;
+
+  while (block < (USED_BLOCK *)BPOOL_END(pool)) {
+    if (!IS_FREE_BLOCK(block)) {
+      used += BLOCK_SIZE(block);
+    }
+    block = PHYS_NEXT(block);
+  }
+
+  if (prof.max < used) prof.max = used;
+  if (used < prof.min) prof.min = used;
+}
+
 //================================================================
 /*! Start memory allocation profiling
 */
-void mrbc_alloc_start_profiling(void)
+void
+est_start_profiling(ESTALLOC *est)
 {
-  if (profiling) return;
-  profiling = 1;
-  alloc_prof.max = 0;
-  alloc_profile();
-  alloc_prof.initial = alloc_prof.min = alloc_prof.max;
+  ESTALLOC_PROF prof = est->prof;
+  if (prof.profiling) return;
+  prof.profiling = 1;
+  prof.max = 0;
+  PROFILE();
+  prof.initial = prof.min = prof.max;
 }
 
 //================================================================
 /*! Stop memory allocation profiling
 */
-void mrbc_alloc_stop_profiling(void)
+void
+est_stop_profiling(ESTALLOC *est)
 {
-  if (!profiling) return;
-  profiling = 0;
+  est->prof.profiling = 0;
 }
+
 
 //================================================================
-/*! Get memory allocation profiling data
-
-  @return pointer to struct MRBC_ALLOC_PROF
-*/
-void mrbc_alloc_get_profiling(struct MRBC_ALLOC_PROF *prof)
+/*! Check the health of memory pool and all blocks
+ *
+ * This function walks through all memory blocks in the pool and checks:
+ * 1. Block alignment is valid
+ * 2. No memory blocks are overlapping
+ * 3. Next/Previous pointers are consistent
+ * 4. Free block list integrity
+ *
+ * @param  est    Pointer to memory pool.
+ * @return int    0 if pool is healthy, non-zero if issues found
+ *                Error bitmask:
+ *                - 0x01: Block alignment error
+ *                - 0x02: Invalid block size (too small)
+ *                - 0x04: Invalid block size (too large)
+ *                - 0x08: Invalid next block address (out of bounds or overlapping)
+ *                - 0x10: Previous block is used but current block says it's free
+ *                - 0x20: Previous block is free but current block says it's used
+ */
+int
+est_sanity_check(ESTALLOC *est)
 {
-  memcpy(prof, &alloc_prof, sizeof(struct MRBC_ALLOC_PROF));
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
+  USED_BLOCK *block = BPOOL_TOP(pool);
+  USED_BLOCK *prev_block = NULL;
+  int errors = 0;
+
+  // Check pool boundaries
+  if (pool == NULL || pool->size == 0) {
+    return 1; // Invalid pool
+  }
+
+  // Walk through all blocks
+  while (block < (USED_BLOCK *)BPOOL_END(pool)) {
+    // Check block alignment
+    if ((BLOCK_SIZE(block) & ALIGNMENT_MASK) != 0) {
+      // Block size is not properly aligned
+      errors |= 0x01;
+    }
+
+    // Check if block size is reasonable
+    if (pool->size < BLOCK_SIZE(block)) {
+      errors |= 0x02;
+    }
+
+    // Check if next block address is valid
+    USED_BLOCK *next = PHYS_NEXT(block);
+    if (next < block || (USED_BLOCK *)BPOOL_END(pool) < next) {
+      // Next block address is invalid
+      errors |= 0x04;
+    }
+
+    // Check prev_used flag consistency
+    if (prev_block != NULL) {
+      if (IS_USED_BLOCK(prev_block) && !IS_PREV_USED(block)) {
+        // Prev block is used but current block says it's free
+        errors |= 0x08;
+      }
+      if (IS_FREE_BLOCK(prev_block) && IS_PREV_USED(block)) {
+        // Prev block is free but current block says it's used
+        errors |= 0x10;
+      }
+    }
+
+    // Move to next block
+    prev_block = block;
+    block = next;
+  }
+
+  return errors;
 }
-#endif  // defined(MRBC_USE_ALLOC_PROF)
+#endif // ESTALLOC_DEBUG
 
 
-#if defined(MRBC_DEBUG)
-//================================================================
-/*! print used/free memory size.
-
-  (examples)
-  mrbc_define_method(0, 0, "print_memstat", (mrbc_func_t)mrbc_alloc_print_statistics);
-*/
-void mrbc_alloc_print_statistics( void )
-{
-  struct MRBC_ALLOC_STATISTICS stat;
-  mrbc_alloc_statistics( &stat );
-  mrbc_printf("== MEMORY STAT ==\n");
-  mrbc_printf(" total:%d used:%d free:%d frag:%d\n",
-	      stat.total, stat.used, stat.free, stat.fragmentation );
-}
-
-
+#if defined(ESTALLOC_PRINT_DEBUG)
 //================================================================
 /*! print memory block for debug.
 
-  (examples)
-  mrbc_define_method(0, 0, "print_memory_pool", (mrbc_func_t)mrbc_alloc_print_memory_pool);
 */
-void mrbc_alloc_print_pool_header( void *pool_header )
+void
+est_print_pool_header(ESTALLOC *est, FILE *fp)
 {
-  MEMORY_POOL *pool = pool_header ? pool_header : memory_pool;
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
+  if (fp == NULL) fp = stderr;
 
-  mrbc_printf("== MEMORY POOL HEADER DUMP ==\n");
-  mrbc_printf(" Address:%p - %p - %p  ", pool,
-	      BPOOL_TOP(pool), BPOOL_END(pool));
-  mrbc_printf(" Size Total:%d User:%d\n",
-	      pool->size, pool->size - sizeof(MEMORY_POOL));
-  mrbc_printf(" sizeof MEMORY_POOL:%d(%04x), USED_BLOCK:%d(%02x), FREE_BLOCK:%d(%02x)\n",
-	      sizeof(MEMORY_POOL), sizeof(MEMORY_POOL),
-	      sizeof(USED_BLOCK), sizeof(USED_BLOCK),
-	      sizeof(FREE_BLOCK), sizeof(FREE_BLOCK) );
+  fprintf(fp, "== MEMORY POOL HEADER DUMP ==\n");
+  fprintf(fp, " Address:%p - %p - %p  ", pool, BPOOL_TOP(pool), BPOOL_END(pool));
+  fprintf(fp, " Size Total:%d User:%" PRIu32 "\n", pool->size, (ESTALLOC_MEMSIZE_T)(pool->size - sizeof(MEMORY_POOL)));
+  fprintf(fp, " sizeof MEMORY_POOL:%" PRIu32 "(%04" PRIx32 "), USED_BLOCK:%" PRIu32 "(%02" PRIx32 "), FREE_BLOCK:%" PRIu32 "(%02" PRIx32 ")\n",
+              (uint32_t)sizeof(MEMORY_POOL), (uint32_t)sizeof(MEMORY_POOL),
+              (uint32_t)sizeof(USED_BLOCK), (uint32_t)sizeof(USED_BLOCK),
+              (uint32_t)sizeof(FREE_BLOCK), (uint32_t)sizeof(FREE_BLOCK));
 
-  mrbc_printf(" FLI/SLI bitmap and free_blocks table.\n");
-  mrbc_printf("    FLI :S[0123 4567] -- free_blocks ");
-  for( int i = 0; i < 64; i++ ) { mrbc_printf("-"); }
-  mrbc_printf("\n");
-  for( int i = 0; i < sizeof(pool->free_sli_bitmap); i++ ) {
-    mrbc_printf(" [%2d] %d :  ", i, !!((pool->free_fli_bitmap << i) & MSB_BIT1_FLI));
-    for( int j = 0; j < 8; j++ ) {
-      mrbc_printf("%d", !!((pool->free_sli_bitmap[i] << j) & MSB_BIT1_SLI));
-      if( (j % 4) == 3 ) mrbc_printf(" ");
+  fprintf(fp, " FLI/SLI bitmap and free_blocks table.\n");
+  fprintf(fp, "    FLI :S[0123 4567] -- free_blocks ");
+  for (unsigned int i = 0; i < 64; i++) { fprintf(fp, "-"); }
+  fprintf(fp, "\n");
+  for (unsigned int i = 0; i < sizeof(pool->free_sli_bitmap); i++) {
+    fprintf(fp, " [%2d] %d :  ", i, !!((pool->free_fli_bitmap << i) & MSB_BIT1_FLI));
+    for (int j = 0; j < 8; j++) {
+      fprintf(fp, "%d", !!((pool->free_sli_bitmap[i] << j) & MSB_BIT1_SLI));
+      if ((j % 4) == 3 ) fprintf(fp, " ");
     }
 
-    for( int j = 0; j < 8; j++ ) {
-      int idx = i * 8 + j;
-      if( idx >= sizeof(pool->free_blocks) / sizeof(FREE_BLOCK *) ) break;
-      mrbc_printf(" %p", pool->free_blocks[idx] );
+    for (int j = 0; j < 8; j++) {
+      unsigned int idx = i * 8 + j;
+      if (idx >= sizeof(pool->free_blocks) / sizeof(FREE_BLOCK *) ) break;
+      fprintf(fp, " %p", pool->free_blocks[idx]);
     }
-    mrbc_printf( "\n" );
+    fprintf(fp,  "\n");
   }
 }
 
-void mrbc_alloc_print_memory_block( void *pool_header )
+void
+est_print_memory_block(ESTALLOC *est, FILE *fp)
 {
-  const int DUMP_BYTES = 32;
-  MEMORY_POOL *pool = pool_header ? pool_header : memory_pool;
+  MEMORY_POOL *pool = (MEMORY_POOL *)est;
+  if (fp == NULL) fp = stderr;
 
-  mrbc_printf("== MEMORY BLOCK DUMP ==\n");
+  const int DUMP_BYTES = 32;
+
+  fprintf(fp, "== MEMORY BLOCK DUMP ==\n");
   FREE_BLOCK *block = BPOOL_TOP(pool);
 
-  while( block < (FREE_BLOCK *)BPOOL_END(pool) ) {
-    mrbc_printf("%p", block );
-#if defined(MRBC_ALLOC_VMID)
-    mrbc_printf(" id:%02x", block->vm_id );
-#endif
-    mrbc_printf(" size:%5d($%04x) use:%d prv:%d ",
-		block->size & ~0x03, block->size & ~0x03,
-		!!(block->size & 0x01), !!(block->size & 0x02) );
+  while (block < (FREE_BLOCK *)BPOOL_END(pool)) {
+    fprintf(fp, "%p", block);
+    fprintf(fp, " size:%5d($%04x) use:%d prv:%d ",
+                block->size & ~ALIGNMENT_MASK, block->size & ~ALIGNMENT_MASK,
+                !!(block->size & 0x01), !!(block->size & 0x02));
 
-    if( IS_USED_BLOCK(block) ) {
+    if (IS_USED_BLOCK(block)) {
       /* Used block */
-      int n = DUMP_BYTES;
-      if( n > (BLOCK_SIZE(block) - sizeof(USED_BLOCK)) ) {
-	n = BLOCK_SIZE(block) - sizeof(USED_BLOCK);
+      unsigned int n = DUMP_BYTES;
+      if (n > (BLOCK_SIZE(block) - sizeof(USED_BLOCK))) {
+        n = BLOCK_SIZE(block) - sizeof(USED_BLOCK);
       }
       uint8_t *p = (uint8_t *)block + sizeof(USED_BLOCK);
-      int i;
-      for( i = 0; i < n; i++) mrbc_printf(" %02x", *p++ );
-      for( ; i < DUMP_BYTES; i++ ) mrbc_printf("   ");
+      unsigned int i;
+      for (i = 0; i < n; i++) fprintf(fp, " %02x", *p++);
+      for (; i < (unsigned int)DUMP_BYTES; i++ ) fprintf(fp, "   ");
 
-      mrbc_printf("  ");
+      fprintf(fp, "  ");
       p = (uint8_t *)block + sizeof(USED_BLOCK);
-      for( i = 0; i < n; i++) {
-	int ch = *p++;
-	mrbc_printf("%c", (' ' <= ch && ch < 0x7f)? ch : '.');
+      for (i = 0; i < n; i++) {
+        int ch = *p++;
+        fprintf(fp, "%c", (' ' <= ch && ch < 0x7f)? ch : '.');
       }
 
     } else {
       /* Free block */
       unsigned int index = calc_index(BLOCK_SIZE(block));
-      mrbc_printf(" fli:%d sli:%d pf:%p nf:%p",
-		FLI(index), SLI(index), block->prev_free, block->next_free);
+      fprintf(fp, " fli:%d sli:%d pf:%p nf:%p",
+      FLI(index), SLI(index), block->prev_free, block->next_free);
     }
 
-    mrbc_printf("\n");
+    fprintf(fp, "\n");
     block = PHYS_NEXT(block);
   }
 }
 
-void mrbc_alloc_print_memory_pool( void )
-{
-  mrbc_alloc_print_pool_header(0);
-  mrbc_alloc_print_memory_block(0);
-}
-
-#endif // defined(MRBC_DEBUG)
-#endif // !defined(MRBC_ALLOC_LIBC)
+#endif // ESTALLOC_PRINT_DEBUG

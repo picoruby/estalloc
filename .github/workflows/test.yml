@@ -1,0 +1,73 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-multilib g++-multilib
+
+    - name: Build all test configurations
+      run: make all
+
+    - name: Run tests
+      run: make test
+
+    - name: Archive test logs
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-logs
+        path: log/*.log
+
+  test-matrix:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    strategy:
+      matrix:
+        test: [
+          test_4_16,     test_4_16_debug,
+          test_8_16,     test_8_16_debug,
+          test_4_24_x86, test_4_24_x86_debug,
+          test_8_24_x86, test_8_24_x86_debug,
+          test_4_24_x64, test_4_24_x64_debug,
+          test_8_24_x64, test_8_24_x64_debug
+        ]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-multilib g++-multilib
+
+    - name: Build ${{ matrix.test }}
+      run: make test/${{ matrix.test }}
+
+    - name: Run ${{ matrix.test }}
+      run: |
+        mkdir -p log
+        ./test/${{ matrix.test }} > log/${{ matrix.test }}.log 2>&1
+        cat log/${{ matrix.test }}.log
+
+    - name: Check test result
+      run: |
+        if grep -q "FATAL\|Aborted" log/${{ matrix.test }}.log; then
+          echo "Test ${{ matrix.test }} failed"
+          exit 1
+        fi
+
