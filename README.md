@@ -94,11 +94,11 @@ main()
 ESTALLOC can be configured using the following macros:
 
 - `ESTALLOC_ALIGNMENT`: Memory alignment (default: N/A. You need to explicitly define `4` or `8`)
-- `ESTALLOC_16BIT` or `ESTALLOC_24BIT`: Addressable memory range bit width (default:`ESTALLOC_24BIT`)
+- `ESTALLOC_ADDRESS_16BIT` or `ESTALLOC_ADDRESS_24BIT`: Addressable memory range bit width (default:`ESTALLOC_ADDRESS_24BIT`)
 
 ### Build Matrix
 
-|                 | ESTALLOC_16BIT | ESTALLOC_24BIT |
+|                 | ESTALLOC_ADDRESS_16BIT | ESTALLOC_ADDRESS_24BIT |
 |-----------------|:--------------:|:--------------:|
 | 16-bit Platform | ✅             | ✅             |
 | 32-bit Platform | ✅             | ✅             |
@@ -112,11 +112,3 @@ ESTALLOC can be configured using the following macros:
 - `ESTALLOC_MIN_MEMORY_BLOCK_SIZE`: Minimum memory block size (defalut: `16` or `32`)
 
 (See details in [estalloc.c](estalloc.c))
-
-## License
-
-This software is distributed under the BSD 3-Clause License.
-
-- Original Copyright: (C) 2015- Kyushu Institute of Technology, Shimane IT Open-Innovation Center
-- Modifications: (C) 2025- HASUMI Hitoshi @hasumikin
-
