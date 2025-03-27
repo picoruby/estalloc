@@ -297,7 +297,7 @@ calc_index(ESTALLOC_MEMSIZE_T alloc_size)
 //================================================================
 /*! Mark that block free and register it in the free index table.
 
-  @param  pool    Pointer to memory pool.
+  @param  pool    Pointer to ESTALLOC.
   @param  target  Pointer to target block.
 */
 static void
@@ -328,7 +328,7 @@ add_free_block(MEMORY_POOL *pool, FREE_BLOCK *target)
 //================================================================
 /*! just remove the free_block *target from index
 
-  @param  pool    Pointer to memory pool.
+  @param  pool    Pointer to ESTALLOC.
   @param  target  pointer to target block.
 */
 static void
@@ -403,6 +403,7 @@ void merge_block(FREE_BLOCK *target, FREE_BLOCK *next)
 
   @param  ptr  pointer to free memory block.
   @param  size  size. (max 64KB. see ESTALLOC_MEMSIZE_T)
+  @return ESTALLOC *  pointer to memory pool.
 */
 ESTALLOC *
 est_init(void *ptr, unsigned int size)
@@ -450,6 +451,8 @@ est_init(void *ptr, unsigned int size)
 
 //================================================================
 /*! cleanup memory pool
+
+  @param  est     Pointer to ESTALLOC.
 */
 void
 est_cleanup(ESTALLOC *est)
@@ -471,6 +474,7 @@ est_cleanup(ESTALLOC *est)
 //================================================================
 /*! allocate memory
 
+  @param  est     Pointer to ESTALLOC.
   @param  size  request size.
   @return void * pointer to allocated memory.
   @retval NULL  Out of memory.
@@ -585,6 +589,7 @@ est_malloc(ESTALLOC *est, unsigned int size)
 //================================================================
 /*! allocate memory that cannot free and realloc
 
+  @param  est     Pointer to ESTALLOC.
   @param  size  request size.
   @return void * pointer to allocated memory.
   @retval NULL  error.
@@ -666,6 +671,7 @@ est_calloc(ESTALLOC *est, unsigned int nmemb, unsigned int size)
 //================================================================
 /*! release memory
 
+  @param  est     Pointer to ESTALLOC.
   @param  ptr  Return value of est_malloc()
 */
 void
@@ -748,6 +754,7 @@ est_free(ESTALLOC *est, void *ptr)
 //================================================================
 /*! re-allocate memory
 
+  @param  est     Pointer to ESTALLOC.
   @param  ptr  Return value of est_malloc()
   @param  size  request size
   @return void * pointer to allocated memory.
@@ -820,6 +827,7 @@ est_realloc(ESTALLOC *est, void *ptr, unsigned int size)
 //================================================================
 /*! allocated memory size
 
+  @param  est     Pointer to ESTALLOC.
   @param  ptr           Return value of est_malloc()
   @retval unsigned int  pointer to allocated memory.
 */
@@ -836,7 +844,7 @@ est_usable_size(ESTALLOC *est, void *ptr)
 //================================================================
 /*! statistics
 
-  @param  est     Pointer to memory pool.
+  @param  est     Pointer to ESTALLOC.
 */
 void
 est_take_statistics(ESTALLOC *est)
@@ -867,6 +875,8 @@ est_take_statistics(ESTALLOC *est)
 
 //================================================================
 /*! Record current memory usage for profiling
+
+  @param  est     Pointer to ESTALLOC.
 */
 static void
 take_profile(ESTALLOC *est)
@@ -889,6 +899,8 @@ take_profile(ESTALLOC *est)
 
 //================================================================
 /*! Start memory allocation profiling
+
+  @param  est     Pointer to ESTALLOC.
 */
 void
 est_start_profiling(ESTALLOC *est)
@@ -903,6 +915,8 @@ est_start_profiling(ESTALLOC *est)
 
 //================================================================
 /*! Stop memory allocation profiling
+
+  @param  est     Pointer to ESTALLOC.
 */
 void
 est_stop_profiling(ESTALLOC *est)
@@ -920,15 +934,14 @@ est_stop_profiling(ESTALLOC *est)
  * 3. Next/Previous pointers are consistent
  * 4. Free block list integrity
  *
- * @param  est    Pointer to memory pool.
+ * @param  est    Pointer to ESTALLOC.
  * @return int    0 if pool is healthy, non-zero if issues found
  *                Error bitmask:
  *                - 0x01: Block alignment error
- *                - 0x02: Invalid block size (too small)
- *                - 0x04: Invalid block size (too large)
- *                - 0x08: Invalid next block address (out of bounds or overlapping)
- *                - 0x10: Previous block is used but current block says it's free
- *                - 0x20: Previous block is free but current block says it's used
+ *                - 0x02: Invalid block size (too large)
+ *                - 0x04: Invalid next block address (out of bounds or overlapping)
+ *                - 0x08: Previous block is used but current block says it's free
+ *                - 0x10: Previous block is free but current block says it's used
  */
 int
 est_sanity_check(ESTALLOC *est)
@@ -987,8 +1000,10 @@ est_sanity_check(ESTALLOC *est)
 
 #if defined(ESTALLOC_PRINT_DEBUG)
 //================================================================
-/*! print memory block for debug.
+/*! print pool header for debug.
 
+  @param  est     Pointer to ESTALLOC.
+  @param  fp      File pointer.
 */
 void
 est_print_pool_header(ESTALLOC *est, FILE *fp)
@@ -1024,6 +1039,12 @@ est_print_pool_header(ESTALLOC *est, FILE *fp)
   }
 }
 
+//================================================================
+/*! print memory block for debug.
+
+  @param  est     Pointer to ESTALLOC.
+  @param  fp      File pointer.
+*/
 void
 est_print_memory_block(ESTALLOC *est, FILE *fp)
 {
