@@ -18,7 +18,7 @@
 
 #include "estalloc.h"
 
-#if defined(ESTALLOC_16BIT)
+#if defined(ESTALLOC_ADDRESS_16BIT)
 # define POOL_SIZE (1024 * 64 - 1)    // 64KB pool
 #else
 # define POOL_SIZE (1024 * 1024 - 1)  // 1MB pool
