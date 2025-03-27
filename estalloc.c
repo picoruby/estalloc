@@ -121,9 +121,6 @@
 
 
 /***** Typedefs *************************************************************/
-#if !defined(ESTALLOC_16BIT) && !defined(ESTALLOC_24BIT)
-# define ESTALLOC_24BIT
-#endif
 /*
   define memory block header for 16 bit
 
@@ -134,7 +131,6 @@
   on 16bit machine.
 */
 #if defined(ESTALLOC_16BIT)
-#define ESTALLOC_MEMSIZE_T  uint16_t
 
 typedef struct USED_BLOCK {
   ESTALLOC_MEMSIZE_T size;    //!< block size, header included
@@ -160,7 +156,6 @@ typedef struct FREE_BLOCK {
   on 32bit machine.
 */
 #elif defined(ESTALLOC_24BIT)
-#define ESTALLOC_MEMSIZE_T  uint32_t
 
 typedef struct USED_BLOCK {
   ESTALLOC_MEMSIZE_T size;

@@ -17,14 +17,11 @@
 #ifndef ESTALLOC_H_
 #define ESTALLOC_H_
 
-/***** Local headers ********************************************************/
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-/***** Constant values ******************************************************/
-/***** Macros ***************************************************************/
-/***** Typedefs *************************************************************/
 
 #if defined (__alpha__) || defined (__ia64__) || defined (__x86_64__) \
     || defined (_WIN64) || defined (__LP64__) || defined (__LLP64__) \
@@ -34,6 +31,14 @@ extern "C" {
 
 #if defined(ESTALLOC_16BIT) && defined(PLATFORM_64BIT)
 # error "ESTALLOC_16BIT is not compatible with 64-bit architecture."
+#endif
+#if !defined(ESTALLOC_16BIT) && !defined(ESTALLOC_24BIT)
+# define ESTALLOC_24BIT
+#endif
+#if defined(ESTALLOC_16BIT)
+# define ESTALLOC_MEMSIZE_T  uint16_t
+#elif defined(ESTALLOC_24BIT)
+# define ESTALLOC_MEMSIZE_T  uint32_t
 #endif
 
 #if !defined(ESTALLOC_ALIGNMENT)
@@ -46,31 +51,31 @@ extern "C" {
 # error 'ESTALLOC_ALIGNMENT' must be 4 or 8.
 #endif
 
-#if defined(ESTALLOC_DEBUG)
 /*!@brief
   Structure for est_take_statistics function.
   If you use this, define ESTALLOC_DEBUG pre-processor macro.
 */
-typedef struct ESTALLOC_STATISTICS {
-  unsigned int total;   // total memory
-  unsigned int used;    // used memory
-  unsigned int free;    // free memory
-  unsigned int frag;    // memory fragmentation count
-} ESTALLOC_STATISTICS;
+typedef struct ESTALLOC_STAT {
+  ESTALLOC_MEMSIZE_T total;   // total memory
+  ESTALLOC_MEMSIZE_T used;    // used memory
+  ESTALLOC_MEMSIZE_T free;    // free memory
+  ESTALLOC_MEMSIZE_T frag;    // memory fragmentation count
+} ESTALLOC_STAT;
 
+#if defined(ESTALLOC_DEBUG)
 /*!@brief
   Structure for est_start_profiling and est_stop_profiling functions.
   If you use this, define ESTALLOC_DEBUG pre-processor macro.
 */
 typedef struct ESTALLOC_PROF {
-  int profiling;
-  unsigned long initial;
-  unsigned long max;
-  unsigned long min;
+  uint8_t profiling;
+  ESTALLOC_MEMSIZE_T initial;
+  ESTALLOC_MEMSIZE_T max;
+  ESTALLOC_MEMSIZE_T min;
 } ESTALLOC_PROF;
 
 typedef struct ESTALLOC {
-  ESTALLOC_STATISTICS stat;
+  ESTALLOC_STAT stat;
   ESTALLOC_PROF prof;
   const char *error_message;
 #if ESTALLOC_ALIGNMENT == 8
@@ -80,6 +85,7 @@ typedef struct ESTALLOC {
 #else
 //typedef void ESTALLOC;
 typedef struct ESTALLOC {
+  ESTALLOC_STAT stat;
   char *error_message;
 #if ESTALLOC_ALIGNMENT == 8
   char padding[4];
@@ -97,14 +103,16 @@ void *est_calloc(ESTALLOC *est, unsigned int nmemb, unsigned int size);
 void est_free(ESTALLOC *est, void *ptr);
 unsigned int est_usable_size(ESTALLOC *est, void *ptr);
 
+void est_take_statistics(ESTALLOC *est);
+
 #if defined(ESTALLOC_DEBUG)
 int est_sanity_check(ESTALLOC *est);
-void est_take_statistics(ESTALLOC *est);
 void est_start_profiling(ESTALLOC *est);
 void est_stop_profiling(ESTALLOC *est);
 #endif
 
 #if defined(ESTALLOC_PRINT_DEBUG)
+#include <stdio.h>
 void est_print_pool_header(ESTALLOC *est, FILE *fp);
 void est_print_memory_block(ESTALLOC *est, FILE *fp);
 #endif

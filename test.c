@@ -126,6 +126,14 @@ log_operation(enum operation_type op, void *ptr, size_t size, int result)
 int
 main()
 {
+  // print size of structures
+#if defined(ESTALLOC_DEBUG)
+  fprintf(stderr, "sizeof(ESTALLOC_PROF): %zu\n", sizeof(ESTALLOC_PROF));
+#endif
+  fprintf(stderr, "sizeof(ESTALLOC_STAT): %zu\n", sizeof(ESTALLOC_STAT));
+  fprintf(stderr, "sizeof(ESTALLOC): %zu\n", sizeof(ESTALLOC));
+  fprintf(stderr, "\n");
+
   void *pool_memory = malloc(POOL_SIZE);
   if (!pool_memory) {
     fprintf(stderr, "Failed to allocate memory for pool\n");
