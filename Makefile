@@ -20,18 +20,18 @@ OUTDIR = test
 LOGDIR = log
 
 # All test configurations
-CONFIGS = $(OUTDIR)/test_4_16 \
-          $(OUTDIR)/test_4_16_debug \
-		  $(OUTDIR)/test_8_16 \
-		  $(OUTDIR)/test_8_16_debug \
-		  $(OUTDIR)/test_4_24_x86 \
-		  $(OUTDIR)/test_4_24_x86_debug \
-		  $(OUTDIR)/test_8_24_x86 \
-		  $(OUTDIR)/test_8_24_x86_debug \
-		  $(OUTDIR)/test_4_24_x64 \
-		  $(OUTDIR)/test_4_24_x64_debug \
-		  $(OUTDIR)/test_8_24_x64 \
-		  $(OUTDIR)/test_8_24_x64_debug
+CONFIGS = $(OUTDIR)/test_4_16_32bit \
+          $(OUTDIR)/test_4_16_32bit_debug \
+		  $(OUTDIR)/test_8_16_32bit \
+		  $(OUTDIR)/test_8_16_32bit_debug \
+		  $(OUTDIR)/test_4_24_32bit \
+		  $(OUTDIR)/test_4_24_32bit_debug \
+		  $(OUTDIR)/test_8_24_32bit \
+		  $(OUTDIR)/test_8_24_32bit_debug \
+		  $(OUTDIR)/test_4_24_64bit \
+		  $(OUTDIR)/test_4_24_64bit_debug \
+		  $(OUTDIR)/test_8_24_64bit \
+		  $(OUTDIR)/test_8_24_64bit_debug
 
 # Source files
 SRCS = estalloc.h estalloc.c test.c
@@ -47,51 +47,51 @@ clean:
 	rm -rf $(OUTDIR)/* $(LOGDIR)/*
 
 # Build rules
-$(OUTDIR)/test_4_16: $(SRCS)
+$(OUTDIR)/test_4_16_32bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_16BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_16: $(SRCS)
+$(OUTDIR)/test_8_16_32bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_16BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_4_16_debug: $(SRCS)
+$(OUTDIR)/test_4_16_32bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_16BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_16_debug: $(SRCS)
+$(OUTDIR)/test_8_16_32bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_16BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_4_24_x86: $(SRCS)
+$(OUTDIR)/test_4_24_32bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_24_x86: $(SRCS)
+$(OUTDIR)/test_8_24_32bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_4_24_x86_debug: $(SRCS)
+$(OUTDIR)/test_4_24_32bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_24_x86_debug: $(SRCS)
+$(OUTDIR)/test_8_24_32bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_4_24_x64: $(SRCS)
+$(OUTDIR)/test_4_24_64bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_64) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_24_x64: $(SRCS)
+$(OUTDIR)/test_8_24_64bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_64) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_4_24_x64_debug: $(SRCS)
+$(OUTDIR)/test_4_24_64bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_64) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_24_x64_debug: $(SRCS)
+$(OUTDIR)/test_8_24_64bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_64) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_24BIT $^ -o $@ $(LDFLAGS)
 

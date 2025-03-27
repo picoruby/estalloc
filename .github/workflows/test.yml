@@ -38,12 +38,12 @@ jobs:
     strategy:
       matrix:
         test: [
-          test_4_16,     test_4_16_debug,
-          test_8_16,     test_8_16_debug,
-          test_4_24_x86, test_4_24_x86_debug,
-          test_8_24_x86, test_8_24_x86_debug,
-          test_4_24_x64, test_4_24_x64_debug,
-          test_8_24_x64, test_8_24_x64_debug
+          test_4_16_32bit, test_4_16_32bit_debug,
+          test_8_16_32bit, test_8_16_32bit_debug,
+          test_4_24_32bit, test_4_24_32bit_debug,
+          test_8_24_32bit, test_8_24_32bit_debug,
+          test_4_24_64bit, test_4_24_64bit_debug,
+          test_8_24_64bit, test_8_24_64bit_debug
         ]
 
     steps:

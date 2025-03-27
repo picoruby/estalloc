@@ -29,15 +29,15 @@ extern "C" {
 # define PLATFORM_64BIT
 #endif
 
-#if defined(ESTALLOC_16BIT) && defined(PLATFORM_64BIT)
-# error "ESTALLOC_16BIT is not compatible with 64-bit architecture."
+#if defined(ESTALLOC_ADDRESS_16BIT) && defined(PLATFORM_64BIT)
+# error "ESTALLOC_ADDRESS_16BIT is not compatible with 64-bit architecture."
 #endif
-#if !defined(ESTALLOC_16BIT) && !defined(ESTALLOC_24BIT)
-# define ESTALLOC_24BIT
+#if !defined(ESTALLOC_ADDRESS_16BIT) && !defined(ESTALLOC_ADDRESS_24BIT)
+# define ESTALLOC_ADDRESS_24BIT
 #endif
-#if defined(ESTALLOC_16BIT)
+#if defined(ESTALLOC_ADDRESS_16BIT)
 # define ESTALLOC_MEMSIZE_T  uint16_t
-#elif defined(ESTALLOC_24BIT)
+#elif defined(ESTALLOC_ADDRESS_24BIT)
 # define ESTALLOC_MEMSIZE_T  uint32_t
 #endif
 

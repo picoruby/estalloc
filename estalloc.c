@@ -130,7 +130,7 @@
     FREE_BLOCK is 8 bytes
   on 16bit machine.
 */
-#if defined(ESTALLOC_16BIT)
+#if defined(ESTALLOC_ADDRESS_16BIT)
 
 typedef struct USED_BLOCK {
   ESTALLOC_MEMSIZE_T size;    //!< block size, header included
@@ -155,7 +155,7 @@ typedef struct FREE_BLOCK {
     FREE_BLOCK is 16 bytes
   on 32bit machine.
 */
-#elif defined(ESTALLOC_24BIT)
+#elif defined(ESTALLOC_ADDRESS_24BIT)
 
 typedef struct USED_BLOCK {
   ESTALLOC_MEMSIZE_T size;
@@ -412,7 +412,7 @@ est_init(void *ptr, unsigned int size)
   /*
     If you get this assertion, you can change minimum memory block size
     parameter to `ESTALLOC_MIN_MEMORY_BLOCK_SIZE (1 << ESTALLOC_IGNORE_LSBS)`
-    and #define ESTALLOC_16BIT.
+    and #define ESTALLOC_ADDRESS_16BIT.
   */
 
   assert((sizeof(MEMORY_POOL) & ALIGNMENT_MASK) == 0);
