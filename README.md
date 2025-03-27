@@ -44,8 +44,8 @@ When compiled with `ESTALLOC_DEBUG` defined:
 
 When compiled with `ESTALLOC_PRINT_DEBUG` defined:
 
-- `est_print_pool_header(ESTALLOC *est, FILE *fp)`: Print memory pool header information
-- `est_print_memory_block(ESTALLOC *est, FILE *fp)`: Print detailed memory block information
+- `est_fprint_pool_header(ESTALLOC *est, FILE *fp)`: Print memory pool header information
+- `est_fprint_memory_block(ESTALLOC *est, FILE *fp)`: Print detailed memory block information
 
 ## Usage Example
 
