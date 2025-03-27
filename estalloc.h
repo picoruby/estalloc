@@ -113,8 +113,8 @@ void est_stop_profiling(ESTALLOC *est);
 
 #if defined(ESTALLOC_PRINT_DEBUG)
 #include <stdio.h>
-void est_print_pool_header(ESTALLOC *est, FILE *fp);
-void est_print_memory_block(ESTALLOC *est, FILE *fp);
+void est_fprint_pool_header(ESTALLOC *est, FILE *fp);
+void est_fprint_memory_block(ESTALLOC *est, FILE *fp);
 #endif
 
 #ifdef __cplusplus

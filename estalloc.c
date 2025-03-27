@@ -1006,7 +1006,7 @@ est_sanity_check(ESTALLOC *est)
   @param  fp      File pointer.
 */
 void
-est_print_pool_header(ESTALLOC *est, FILE *fp)
+est_fprint_pool_header(ESTALLOC *est, FILE *fp)
 {
   MEMORY_POOL *pool = (MEMORY_POOL *)est;
   if (fp == NULL) fp = stderr;
@@ -1046,7 +1046,7 @@ est_print_pool_header(ESTALLOC *est, FILE *fp)
   @param  fp      File pointer.
 */
 void
-est_print_memory_block(ESTALLOC *est, FILE *fp)
+est_fprint_memory_block(ESTALLOC *est, FILE *fp)
 {
   MEMORY_POOL *pool = (MEMORY_POOL *)est;
   if (fp == NULL) fp = stderr;

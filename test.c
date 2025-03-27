@@ -168,8 +168,8 @@ main()
       print_sanity_error(result);
       if (result != 0) {
 #ifdef ESTALLOC_PRINT_DEBUG
-        est_print_pool_header(est, stdout);
-        est_print_memory_block(est, stdout);
+        est_fprint_pool_header(est, stdout);
+        est_fprint_memory_block(est, stdout);
 #endif
         fprintf(stderr, "Test failed: Sanity check failed\n");
         return 1;
@@ -340,8 +340,8 @@ main()
 #ifdef ESTALLOC_PRINT_DEBUG
   // Print detailed memory information
   printf("\n--- Memory Pool Details ---\n");
-  est_print_pool_header(est, stdout);
-  est_print_memory_block(est, stdout);
+  est_fprint_pool_header(est, stdout);
+  est_fprint_memory_block(est, stdout);
 #endif
 #endif
 
