@@ -810,10 +810,10 @@ est_realloc(ESTALLOC *est, void *ptr, unsigned int size)
   // new alloc and copy
  ALLOC_AND_COPY: {
     void *new_ptr = est_malloc(est, size);
-    if (new_ptr == NULL ) return NULL;  // ENOMEM
-    unsigned int copy_size = BLOCK_SIZE(target) - sizeof(USED_BLOCK);
-    if (size < copy_size) copy_size = size;
-    for (uint32_t i = 0; i < copy_size; i++) {
+    if (new_ptr == NULL) return NULL;  // ENOMEM
+
+    // At this point, BLOCK_SIZE(target) is new alloc size.
+    for (unsigned int i = 0; i < BLOCK_SIZE(target) - sizeof(USED_BLOCK); i++) {
       ((uint8_t *)new_ptr)[i] = ((uint8_t *)ptr)[i];
     }
     est_free(est, ptr);
