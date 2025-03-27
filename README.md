@@ -35,12 +35,42 @@ ESTALLOC provides the following memory management functions:
 
 ### Debug Functions
 
-When compiled with `ESTALLOC_DEBUG` defined:
+In any build:
 
 - `est_take_statistics(ESTALLOC *est)`: Collect memory usage statistics
+    ```c
+    est_take_statistics(est);
+    est->stat.total;    // Total memory
+    est->stat.used;     // Used memory
+    est->stat.free;     // Free memory
+    est->stat.frag;     // Number of fragmentation
+    ```
+
+When compiled with `ESTALLOC_DEBUG` defined:
+
 - `est_start_profiling(ESTALLOC *est)`: Start memory profiling
 - `est_stop_profiling(ESTALLOC *est)`: Stop memory profiling
+    ```c
+    est_start_profiling(est);
+    {
+      // Do someting. ESTALLOC records the memory usage
+    }
+    est_stop_profiling(est);
+    est->prof.initial;  // Initial memory usage at `est_start_profiling()` called
+    est->prof.max;      // Maximum memory usage during profiling
+    est->prof.min;      // Minimum memory usage during profiling
+    ```
+
 - `est_sanity_check(ESTALLOC *est)`: Check memory pool integrity
+    ```c
+    int result = est_sanity_check(est);
+    if (result == 0) {
+      // It's sanity
+    } else {
+      // Something went wrong
+      // See comment in estalloc.c for details
+    }
+    ```
 
 When compiled with `ESTALLOC_PRINT_DEBUG` defined:
 
