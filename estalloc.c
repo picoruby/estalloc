@@ -860,9 +860,9 @@ est_take_statistics(ESTALLOC *est)
 
   while (block < (USED_BLOCK *)BPOOL_END(pool)) {
     if (IS_FREE_BLOCK(block)) {
-      est->stat.free += BLOCK_SIZE(block) + sizeof(FREE_BLOCK);
+      est->stat.free += BLOCK_SIZE(block);
     } else {
-      est->stat.used += BLOCK_SIZE(block) + sizeof(USED_BLOCK);
+      est->stat.used += BLOCK_SIZE(block);
     }
     if (flag_used_free != IS_USED_BLOCK(block)) {
       est->stat.frag++;
