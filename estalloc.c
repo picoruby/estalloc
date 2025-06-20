@@ -490,6 +490,10 @@ est_malloc(ESTALLOC *est, unsigned int size)
   // check minimum alloc size.
   if (alloc_size < ESTALLOC_MIN_MEMORY_BLOCK_SIZE ) alloc_size = ESTALLOC_MIN_MEMORY_BLOCK_SIZE;
 
+  if ((uint8_t *)BPOOL_END(pool) - alloc_size < (uint8_t *)BPOOL_TOP(pool)) {
+    return NULL; // request size is too large.
+  }
+
   FREE_BLOCK *target;
   unsigned int fli, sli;
   unsigned int index = calc_index(alloc_size);
@@ -548,6 +552,9 @@ est_malloc(ESTALLOC *est, unsigned int size)
   }
 
  FOUND_TARGET_BLOCK:
+  if ((uint8_t *)target + alloc_size > (uint8_t *)BPOOL_END(pool)) {
+    return NULL; // Check pool boundary.
+  }
   assert(BLOCK_SIZE(target) >= alloc_size);
 
   // remove free_blocks index
