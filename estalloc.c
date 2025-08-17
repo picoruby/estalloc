@@ -373,7 +373,7 @@ split_block(FREE_BLOCK *target, ESTALLOC_MEMSIZE_T size)
   // split block, free
   FREE_BLOCK *split = (FREE_BLOCK *)((uint8_t *)target + size);
 
-  split->size  = BLOCK_SIZE(target) - size;
+  split->size = BLOCK_SIZE(target) - size;
   target->size = size | (target->size & ALIGNMENT_MASK);  // copy a size with flags.
 
   return split;
