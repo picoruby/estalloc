@@ -34,7 +34,7 @@ CONFIGS = $(OUTDIR)/test_4_16_32bit \
 		  $(OUTDIR)/test_8_24_64bit_debug
 
 # Source files
-SRCS = estalloc.h estalloc.c test.c
+SRCS = estalloc.h estalloc.c test/test.c
 
 .DEFAULT_GOAL := all
 

@@ -16,7 +16,7 @@
 #include <assert.h>
 #include <inttypes.h>
 
-#include "estalloc.h"
+#include "../estalloc.h"
 
 #if defined(ESTALLOC_ADDRESS_16BIT)
 # define POOL_SIZE (1024 * 64 - 1)    // 64KB pool
