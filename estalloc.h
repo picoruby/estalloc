@@ -23,9 +23,14 @@
 extern "C" {
 #endif
 
-#if defined (__alpha__) || defined (__ia64__) || defined (__x86_64__) \
-    || defined (_WIN64) || defined (__LP64__) || defined (__LLP64__) \
-    || defined(__ppc64__) || defined(__aarch64__)
+/*
+  PLATFORM_64BIT means "a pointer is 8 bytes wide", not "the CPU is 64-bit".
+  Deriving it from architecture macros breaks on ILP32 ABIs that run on 64-bit
+  CPUs: on arm64_32 (Apple Watch Series 4 and later) clang defines __aarch64__
+  while sizeof(void *) is 4, which used to give a pool header that is not a
+  multiple of ESTALLOC_ALIGNMENT.
+*/
+#if defined(UINTPTR_MAX) && UINTPTR_MAX > 0xFFFFFFFFu
 # define PLATFORM_64BIT
 #endif
 

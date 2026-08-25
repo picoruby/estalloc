@@ -43,7 +43,9 @@ jobs:
           test_4_24_32bit, test_4_24_32bit_debug,
           test_8_24_32bit, test_8_24_32bit_debug,
           test_4_24_64bit, test_4_24_64bit_debug,
-          test_8_24_64bit, test_8_24_64bit_debug
+          test_8_24_64bit, test_8_24_64bit_debug,
+          test_4_24_arm64_32, test_4_24_arm64_32_debug,
+          test_8_24_arm64_32, test_8_24_arm64_32_debug
         ]
 
     steps:

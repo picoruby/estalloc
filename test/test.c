@@ -78,6 +78,115 @@ check_memory_content(void *ptr, size_t size, unsigned char value)
 }
 
 // ================================================================
+// Layout tests
+// ================================================================
+
+/*
+  Regression test for issue #2 (arm64_32 crash).
+
+  A pool header whose size is not a multiple of ESTALLOC_ALIGNMENT shifts every
+  block off its boundary and makes the chain miss the end-of-pool sentinel. The
+  symptom on the device was a wild pointer inside remove_free_block(), so check
+  the alignment directly and walk the pool until it is exhausted.
+*/
+#define LAYOUT_ALLOCS 16
+
+/*
+  A user pointer sits sizeof(USED_BLOCK) bytes into an ESTALLOC_ALIGNMENT
+  aligned block. That header is 8 bytes in 24-bit address mode but only 4 bytes
+  in 16-bit address mode, so ESTALLOC_ALIGNMENT=8 combined with
+  ESTALLOC_ADDRESS_16BIT hands out 4-byte aligned pointers by construction.
+*/
+#if defined(ESTALLOC_ADDRESS_16BIT)
+# define EXPECTED_USER_ALIGNMENT 4
+#else
+# define EXPECTED_USER_ALIGNMENT ESTALLOC_ALIGNMENT
+#endif
+#define USER_ALIGNMENT_MASK (EXPECTED_USER_ALIGNMENT - 1)
+
+static int
+test_pool_layout(void)
+{
+  printf("--- test_pool_layout ---\n");
+  const unsigned int size = 4096;
+  void *mem = malloc(size);
+  if (mem == NULL) {
+    printf("FAILED: could not allocate the pool\n");
+    return 1;
+  }
+  if (((uintptr_t)mem & ALIGNMENT_MASK) != 0) {
+    printf("SKIPPED: malloc() returned %p, not %d-byte aligned\n", mem, ESTALLOC_ALIGNMENT);
+    free(mem);
+    return 0;
+  }
+
+  int failures = 0;
+  ESTALLOC *est = est_init(mem, size);
+  void *ptrs[LAYOUT_ALLOCS] = {0};
+
+  for (int i = 0; i < LAYOUT_ALLOCS; i++) {
+    size_t alloc_size = (size_t)(i * 7 + 1);
+    ptrs[i] = est_malloc(est, (unsigned int)alloc_size);
+    if (ptrs[i] == NULL) {
+      printf("FAILED: est_malloc(%zu) returned NULL\n", alloc_size);
+      failures++;
+      break;
+    }
+    if (((uintptr_t)ptrs[i] & USER_ALIGNMENT_MASK) != 0) {
+      printf("FAILED: est_malloc(%zu) returned %p, not %d-byte aligned\n",
+             alloc_size, ptrs[i], EXPECTED_USER_ALIGNMENT);
+      failures++;
+    }
+    fill_memory(ptrs[i], alloc_size, (unsigned char)i);
+  }
+
+  // Exhaust the pool. A misaligned header makes this walk off the sentinel.
+  while (est_malloc(est, 64) != NULL) { /* no-op */ }
+
+  for (int i = 0; i < LAYOUT_ALLOCS; i++) {
+    if (ptrs[i] == NULL) continue;
+    size_t alloc_size = (size_t)(i * 7 + 1);
+    if (!check_memory_content(ptrs[i], alloc_size, (unsigned char)i)) {
+      printf("FAILED: block %d was corrupted by a later allocation\n", i);
+      failures++;
+    }
+  }
+
+#if defined(ESTALLOC_DEBUG)
+  int sanity = est_sanity_check(est);
+  if (sanity != 0) {
+    printf("FAILED: est_sanity_check() returned 0x%x\n", sanity);
+    failures++;
+  }
+#endif
+
+  for (int i = 0; i < LAYOUT_ALLOCS; i++) {
+    if (ptrs[i] != NULL) est_free(est, ptrs[i]);
+  }
+
+  if (failures == 0) printf("PASSED\n");
+  free(mem);
+  return failures;
+}
+
+static int
+run_layout_tests(void)
+{
+  printf("\n=== Layout Tests ===\n");
+  fprintf(stderr, "sizeof(void *): %zu, ESTALLOC_ALIGNMENT: %d\n",
+          sizeof(void *), ESTALLOC_ALIGNMENT);
+#if defined(PLATFORM_64BIT)
+  fprintf(stderr, "PLATFORM_64BIT: defined\n");
+#else
+  fprintf(stderr, "PLATFORM_64BIT: not defined\n");
+#endif
+  int failures = test_pool_layout();
+  printf("=== Layout Tests: %s (%d failure(s)) ===\n\n",
+         failures == 0 ? "PASSED" : "FAILED", failures);
+  return failures;
+}
+
+// ================================================================
 // Critical section test infrastructure
 // ================================================================
 
@@ -437,6 +546,11 @@ log_operation(enum operation_type op, void *ptr, size_t size, int result)
 int
 main()
 {
+  if (run_layout_tests() != 0) {
+    fprintf(stderr, "Layout tests failed\n");
+    return 1;
+  }
+
   if (run_critical_section_tests() != 0) {
     fprintf(stderr, "Critical section tests failed\n");
     return 1;

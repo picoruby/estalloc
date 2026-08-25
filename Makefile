@@ -10,7 +10,11 @@
 CC = gcc
 CFLAGS_64 = -Wall -Wextra -g -O0
 CFLAGS_32 = -Wall -Wextra -g -O0 -m32
-LDFLAGS = 
+# arm64_32 (Apple Watch) is AArch64 with 4-byte pointers. Forcing
+# PLATFORM_64BIT on an ILP32 build reproduces its struct layout, including the
+# pool header whose sizeof is not a multiple of 8. See issue #2.
+CFLAGS_ILP32_P64 = -Wall -Wextra -g -O0 -m32 -DPLATFORM_64BIT
+LDFLAGS =
 
 # Debug flags for different test configurations
 DEBUG_FLAGS = -DESTALLOC_DEBUG -DESTALLOC_PRINT_DEBUG
@@ -31,7 +35,11 @@ CONFIGS = $(OUTDIR)/test_4_16_32bit \
 		  $(OUTDIR)/test_4_24_64bit \
 		  $(OUTDIR)/test_4_24_64bit_debug \
 		  $(OUTDIR)/test_8_24_64bit \
-		  $(OUTDIR)/test_8_24_64bit_debug
+		  $(OUTDIR)/test_8_24_64bit_debug \
+		  $(OUTDIR)/test_4_24_arm64_32 \
+		  $(OUTDIR)/test_4_24_arm64_32_debug \
+		  $(OUTDIR)/test_8_24_arm64_32 \
+		  $(OUTDIR)/test_8_24_arm64_32_debug
 
 # Source files
 SRCS = estalloc.h estalloc.c test/test.c
@@ -94,6 +102,24 @@ $(OUTDIR)/test_4_24_64bit_debug: $(SRCS)
 $(OUTDIR)/test_8_24_64bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_64) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_ADDRESS_24BIT $^ -o $@ $(LDFLAGS)
+
+# ILP32 with PLATFORM_64BIT forced: reproduces the arm64_32 layout of issue #2.
+# ESTALLOC_ADDRESS_16BIT is rejected by estalloc.h in this combination.
+$(OUTDIR)/test_4_24_arm64_32: $(SRCS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS_ILP32_P64) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_ADDRESS_24BIT $^ -o $@ $(LDFLAGS)
+
+$(OUTDIR)/test_8_24_arm64_32: $(SRCS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS_ILP32_P64) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_ADDRESS_24BIT $^ -o $@ $(LDFLAGS)
+
+$(OUTDIR)/test_4_24_arm64_32_debug: $(SRCS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS_ILP32_P64) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_ADDRESS_24BIT $^ -o $@ $(LDFLAGS)
+
+$(OUTDIR)/test_8_24_arm64_32_debug: $(SRCS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS_ILP32_P64) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_ADDRESS_24BIT $^ -o $@ $(LDFLAGS)
 
 # Run all tests
 test: $(CONFIGS)

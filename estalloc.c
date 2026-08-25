@@ -204,7 +204,18 @@ typedef struct MEMORY_POOL {
   FREE_BLOCK *free_blocks[SIZE_FREE_BLOCKS +1];  // +1=sentinel
 } MEMORY_POOL;
 
-#define BPOOL_TOP(memory_pool) ((void *)((uint8_t *)(memory_pool) + sizeof(MEMORY_POOL)))
+/*
+  Size of the pool header, rounded up to ESTALLOC_ALIGNMENT.
+
+  sizeof(MEMORY_POOL) is not guaranteed to be a multiple of the alignment on
+  every ABI, so it must never be used to locate the first memory block. Round
+  up here instead of hand-padding ESTALLOC for each known ABI: the few wasted
+  bytes buy an allocator that lays out correctly wherever it is compiled.
+*/
+#define POOL_HEADER_SIZE \
+  ((sizeof(MEMORY_POOL) + ALIGNMENT_MASK) & ~(size_t)ALIGNMENT_MASK)
+
+#define BPOOL_TOP(memory_pool) ((void *)((uint8_t *)(memory_pool) + POOL_HEADER_SIZE))
 #define BPOOL_END(memory_pool) ((void *)((uint8_t *)(memory_pool) + ((MEMORY_POOL *)(memory_pool))->size))
 #define BLOCK_ADRS(p) ((void *)((uint8_t *)(p) - sizeof(USED_BLOCK)))
 
@@ -212,6 +223,31 @@ typedef struct MEMORY_POOL {
 #define MSB_BIT1_SLI 0x80
 #define NLZ_FLI(x) nlz16(x)
 #define NLZ_SLI(x) nlz8(x)
+
+
+/***** Compile time checks **************************************************/
+/*
+  These are checked at compile time rather than with assert(), because a
+  release build defines NDEBUG and would silently ship a broken layout.
+*/
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+# define ESTALLOC_STATIC_ASSERT(name, cond) _Static_assert(cond, #name)
+#else
+# define ESTALLOC_STATIC_ASSERT(name, cond) \
+    typedef char estalloc_static_assert_##name[(cond) ? 1 : -1]
+#endif
+
+ESTALLOC_STATIC_ASSERT(pool_header_is_aligned,
+                       (POOL_HEADER_SIZE & ALIGNMENT_MASK) == 0);
+/*
+  If you get the following assertion, you can change minimum memory block size
+  parameter to `ESTALLOC_MIN_MEMORY_BLOCK_SIZE (1 << ESTALLOC_IGNORE_LSBS)`
+  and #define ESTALLOC_ADDRESS_16BIT.
+*/
+ESTALLOC_STATIC_ASSERT(min_block_holds_free_block,
+                       ESTALLOC_MIN_MEMORY_BLOCK_SIZE >= sizeof(FREE_BLOCK));
+ESTALLOC_STATIC_ASSERT(min_block_covers_ignored_lsbs,
+                       ESTALLOC_MIN_MEMORY_BLOCK_SIZE >= (1 << ESTALLOC_IGNORE_LSBS));
 
 
 #if defined(ESTALLOC_DEBUG)
@@ -422,15 +458,7 @@ void merge_block(FREE_BLOCK *target, FREE_BLOCK *next)
 ESTALLOC *
 est_init(void *ptr, unsigned int size)
 {
-  assert(ESTALLOC_MIN_MEMORY_BLOCK_SIZE >= sizeof(FREE_BLOCK));
-  assert(ESTALLOC_MIN_MEMORY_BLOCK_SIZE >= (1 << ESTALLOC_IGNORE_LSBS));
-  /*
-    If you get this assertion, you can change minimum memory block size
-    parameter to `ESTALLOC_MIN_MEMORY_BLOCK_SIZE (1 << ESTALLOC_IGNORE_LSBS)`
-    and #define ESTALLOC_ADDRESS_16BIT.
-  */
-
-  assert((sizeof(MEMORY_POOL) & ALIGNMENT_MASK) == 0);
+  /* Layout invariants are checked at compile time. See "Compile time checks". */
 #if defined(UINTPTR_MAX)
   assert(((uintptr_t)ptr & ALIGNMENT_MASK) == 0);
 #else
@@ -450,7 +478,7 @@ est_init(void *ptr, unsigned int size)
   //  large free block + zero size used block (sentinel).
   ESTALLOC_MEMSIZE_T sentinel_size = sizeof(USED_BLOCK);
   sentinel_size += (-sentinel_size & ALIGNMENT_MASK);
-  ESTALLOC_MEMSIZE_T free_size = size - sizeof(MEMORY_POOL) - sentinel_size;
+  ESTALLOC_MEMSIZE_T free_size = size - POOL_HEADER_SIZE - sentinel_size;
   FREE_BLOCK *free_block = BPOOL_TOP(memory_pool);
   USED_BLOCK *used_block = (USED_BLOCK *)((uint8_t *)free_block + free_size);
 
@@ -1099,9 +1127,9 @@ est_fprint_pool_header(ESTALLOC *est, FILE *fp)
 
   fprintf(fp, "== MEMORY POOL HEADER DUMP ==\n");
   fprintf(fp, " Address:%p - %p - %p  ", pool, BPOOL_TOP(pool), BPOOL_END(pool));
-  fprintf(fp, " Size Total:%d User:%" PRIu32 "\n", pool->size, (ESTALLOC_MEMSIZE_T)(pool->size - sizeof(MEMORY_POOL)));
-  fprintf(fp, " sizeof MEMORY_POOL:%" PRIu32 "(%04" PRIx32 "), USED_BLOCK:%" PRIu32 "(%02" PRIx32 "), FREE_BLOCK:%" PRIu32 "(%02" PRIx32 ")\n",
-              (uint32_t)sizeof(MEMORY_POOL), (uint32_t)sizeof(MEMORY_POOL),
+  fprintf(fp, " Size Total:%d User:%" PRIu32 "\n", pool->size, (ESTALLOC_MEMSIZE_T)(pool->size - POOL_HEADER_SIZE));
+  fprintf(fp, " pool header:%" PRIu32 "(%04" PRIx32 "), USED_BLOCK:%" PRIu32 "(%02" PRIx32 "), FREE_BLOCK:%" PRIu32 "(%02" PRIx32 ")\n",
+              (uint32_t)POOL_HEADER_SIZE, (uint32_t)POOL_HEADER_SIZE,
               (uint32_t)sizeof(USED_BLOCK), (uint32_t)sizeof(USED_BLOCK),
               (uint32_t)sizeof(FREE_BLOCK), (uint32_t)sizeof(FREE_BLOCK));
 
