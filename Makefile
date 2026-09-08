@@ -26,8 +26,6 @@ LOGDIR = log
 # All test configurations
 CONFIGS = $(OUTDIR)/test_4_16_32bit \
           $(OUTDIR)/test_4_16_32bit_debug \
-		  $(OUTDIR)/test_8_16_32bit \
-		  $(OUTDIR)/test_8_16_32bit_debug \
 		  $(OUTDIR)/test_4_24_32bit \
 		  $(OUTDIR)/test_4_24_32bit_debug \
 		  $(OUTDIR)/test_8_24_32bit \
@@ -59,17 +57,9 @@ $(OUTDIR)/test_4_16_32bit: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_ADDRESS_16BIT $^ -o $@ $(LDFLAGS)
 
-$(OUTDIR)/test_8_16_32bit: $(SRCS)
-	@mkdir -p $(OUTDIR)
-	$(CC) $(CFLAGS_32) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_ADDRESS_16BIT $^ -o $@ $(LDFLAGS)
-
 $(OUTDIR)/test_4_16_32bit_debug: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS_32) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=4 -DESTALLOC_ADDRESS_16BIT $^ -o $@ $(LDFLAGS)
-
-$(OUTDIR)/test_8_16_32bit_debug: $(SRCS)
-	@mkdir -p $(OUTDIR)
-	$(CC) $(CFLAGS_32) $(DEBUG_FLAGS) -DESTALLOC_ALIGNMENT=8 -DESTALLOC_ADDRESS_16BIT $^ -o $@ $(LDFLAGS)
 
 $(OUTDIR)/test_4_24_32bit: $(SRCS)
 	@mkdir -p $(OUTDIR)

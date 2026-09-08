@@ -91,19 +91,6 @@ check_memory_content(void *ptr, size_t size, unsigned char value)
 */
 #define LAYOUT_ALLOCS 16
 
-/*
-  A user pointer sits sizeof(USED_BLOCK) bytes into an ESTALLOC_ALIGNMENT
-  aligned block. That header is 8 bytes in 24-bit address mode but only 4 bytes
-  in 16-bit address mode, so ESTALLOC_ALIGNMENT=8 combined with
-  ESTALLOC_ADDRESS_16BIT hands out 4-byte aligned pointers by construction.
-*/
-#if defined(ESTALLOC_ADDRESS_16BIT)
-# define EXPECTED_USER_ALIGNMENT 4
-#else
-# define EXPECTED_USER_ALIGNMENT ESTALLOC_ALIGNMENT
-#endif
-#define USER_ALIGNMENT_MASK (EXPECTED_USER_ALIGNMENT - 1)
-
 static int
 test_pool_layout(void)
 {
@@ -132,9 +119,9 @@ test_pool_layout(void)
       failures++;
       break;
     }
-    if (((uintptr_t)ptrs[i] & USER_ALIGNMENT_MASK) != 0) {
+    if (((uintptr_t)ptrs[i] & ALIGNMENT_MASK) != 0) {
       printf("FAILED: est_malloc(%zu) returned %p, not %d-byte aligned\n",
-             alloc_size, ptrs[i], EXPECTED_USER_ALIGNMENT);
+             alloc_size, ptrs[i], ESTALLOC_ALIGNMENT);
       failures++;
     }
     fill_memory(ptrs[i], alloc_size, (unsigned char)i);

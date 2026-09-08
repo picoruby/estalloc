@@ -159,15 +159,19 @@ main()
 
 ESTALLOC can be configured using the following macros:
 
-- `ESTALLOC_ALIGNMENT`: Memory alignment (default: N/A. You need to explicitly define `4` or `8`)
+- `ESTALLOC_ALIGNMENT`: Memory alignment, `4` or `8` (default: `8`, or `4` with `ESTALLOC_ADDRESS_16BIT`)
 - `ESTALLOC_ADDRESS_16BIT` or `ESTALLOC_ADDRESS_24BIT`: Addressable memory range bit width (default:`ESTALLOC_ADDRESS_24BIT`)
+
+`ESTALLOC_ALIGNMENT 8` is rejected with `ESTALLOC_ADDRESS_16BIT`: the block
+header is 4 bytes in that mode, so user data can never start on an 8-byte
+boundary.
 
 ### Build Matrix
 
 |                 | ESTALLOC_ADDRESS_16BIT | ESTALLOC_ADDRESS_24BIT |
 |-----------------|:--------------:|:--------------:|
-| 16-bit Platform | ✅             | ✅             |
-| 32-bit Platform | ✅             | ✅             |
+| 16-bit Platform | ✅ (alignment 4)  | ✅             |
+| 32-bit Platform | ✅ (alignment 4)  | ✅             |
 | 64-bit Platform | ❌             | ✅             |
 
 ### Changing these macro is not tested enough:

@@ -47,13 +47,28 @@ extern "C" {
 #endif
 
 #if !defined(ESTALLOC_ALIGNMENT)
-# define ESTALLOC_ALIGNMENT 8
+# if defined(ESTALLOC_ADDRESS_16BIT)
+/* 8-byte alignment is unreachable in this mode. See the check below. */
+#  define ESTALLOC_ALIGNMENT 4
+# else
+#  define ESTALLOC_ALIGNMENT 8
+# endif
 #endif
 
 #if ESTALLOC_ALIGNMENT == 4 || ESTALLOC_ALIGNMENT == 8
 # define ALIGNMENT_MASK (ESTALLOC_ALIGNMENT - 1)
 #else
 # error 'ESTALLOC_ALIGNMENT' must be 4 or 8.
+#endif
+
+/*
+  In 16-bit address mode USED_BLOCK is 4 bytes, so user data always starts
+  4 bytes into an aligned block and can never land on an 8-byte boundary.
+  Reject the combination rather than silently handing out pointers that
+  violate the requested alignment.
+*/
+#if defined(ESTALLOC_ADDRESS_16BIT) && ESTALLOC_ALIGNMENT == 8
+# error "ESTALLOC_ALIGNMENT 8 is not compatible with ESTALLOC_ADDRESS_16BIT. Use ESTALLOC_ALIGNMENT 4."
 #endif
 
 /*!@brief
